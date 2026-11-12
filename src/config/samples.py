@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 SAMPLE_TASKS: dict[str, dict[str, str]] = {
     "Plan my next productive week.": {
         "task": "Plan my next productive week.",
@@ -28,9 +30,35 @@ SAMPLE_TASKS: dict[str, dict[str, str]] = {
 
 SAMPLE_TASK_LABELS = list(SAMPLE_TASKS.keys())
 
+# Stable ids for system/demo tasks shown in Task Manager (not stored as files).
+_SYSTEM_TASK_IDS: dict[str, str] = {
+    "Plan my next productive week.": "system-plan-week",
+    "Research a product opportunity and prepare a brief.": "system-product-brief",
+    "Create a learning roadmap for a new skill.": "system-learning-roadmap",
+}
+
 OUTPUT_FORMATS = [
     "Briefing",
     "Action Plan",
     "Research Summary",
     "Markdown bundle",
 ]
+
+
+def list_system_tasks() -> list[dict[str, Any]]:
+    """Return built-in demo/system tasks as uniform packets for Task Manager."""
+    packets: list[dict[str, Any]] = []
+    for label, fields in SAMPLE_TASKS.items():
+        packets.append(
+            {
+                "id": _SYSTEM_TASK_IDS.get(label, f"system-{abs(hash(label))}"),
+                "title": label,
+                "task": fields.get("task", ""),
+                "background": fields.get("background", ""),
+                "constraints": fields.get("constraints", ""),
+                "time_horizon": fields.get("time_horizon", ""),
+                "output_format": fields.get("output_format", "Briefing"),
+                "source": "system",
+            }
+        )
+    return packets

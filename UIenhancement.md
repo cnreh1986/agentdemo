@@ -3,7 +3,7 @@
 **Product:** Personal AI Workforce Studio  
 **Document type:** UX + technical design  
 **Status:** Implemented (full-width takeover panel) — see [`src/ui/agent_activity_overlay.py`](src/ui/agent_activity_overlay.py)  
-**Related code:** [`pages/1_Workforce_Studio.py`](pages/1_Workforce_Studio.py), [`src/ui/agent_activity_overlay.py`](src/ui/agent_activity_overlay.py), [`src/ui/agent_cards.py`](src/ui/agent_cards.py), [`src/ui/workflow_view.py`](src/ui/workflow_view.py), [`src/orchestration/runner.py`](src/orchestration/runner.py)
+**Related code:** [`pages/2_Workforce_Studio.py`](pages/2_Workforce_Studio.py), [`src/ui/agent_activity_overlay.py`](src/ui/agent_activity_overlay.py), [`src/ui/agent_cards.py`](src/ui/agent_cards.py), [`src/ui/workflow_view.py`](src/ui/workflow_view.py), [`src/orchestration/runner.py`](src/orchestration/runner.py)
 
 ---
 
@@ -207,7 +207,7 @@ When implementation is approved (separate change):
 
 1. Add `src/ui/agent_activity_overlay.py` with `render_agent_activity_overlay(run_state, *, running: bool)`.
 2. Add plain-language copy constants (table in §5) next to or inside that module — keep prompts out of UI.
-3. In [`pages/1_Workforce_Studio.py`](pages/1_Workforce_Studio.py), set `show_agent_overlay=True` on run start; call overlay render from `on_update` and after completion.
+3. In [`pages/2_Workforce_Studio.py`](pages/2_Workforce_Studio.py), set `show_agent_overlay=True` on run start; call overlay render from `on_update` and after completion.
 4. Wire Minimize / Expand via `st.session_state`.
 5. On `AWAITING_HUMAN_APPROVAL` / `FAILED`, switch overlay to completion/failure footer CTAs.
 6. AppTest / smoke: overlay flag set during demo run; pipeline labels present; no secrets in rendered event text.

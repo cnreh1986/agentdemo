@@ -11,4 +11,4 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.switch_page("pages/1_Workforce_Studio.py")
+st.switch_page("pages/2_Workforce_Studio.py")

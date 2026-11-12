@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.config.samples import OUTPUT_FORMATS
+from src.config.samples import OUTPUT_FORMATS, list_system_tasks
 from src.config.settings import get_settings
 from src.ui.components import inject_styles
 
@@ -14,12 +14,13 @@ settings = get_settings()
 
 st.title("Task Manager")
 st.write(
-    "Save reusable task templates, then load them from Workforce Studio. "
-    "Built-in sample tasks are separate and cannot be edited here."
+    "Browse system / demo tasks and manage your own reusable templates. "
+    "System tasks are listed for reference and cannot be edited or deleted. "
+    "Load either type from Workforce Studio."
 )
 
 if not settings.persistence_enabled:
-    st.warning("Persistence is disabled (`WORKFORCE_PERSISTENCE_ENABLED=false`). Enable it to manage tasks.")
+    st.warning("Persistence is disabled (`WORKFORCE_PERSISTENCE_ENABLED=false`). Enable it to manage your tasks.")
     st.stop()
 
 try:
@@ -27,27 +28,44 @@ try:
 
     repo = TaskRepository()
 except Exception as exc:  # noqa: BLE001
-    st.error(f"Could not open task database: {exc}")
+    st.error(f"Could not open task storage: {exc}")
     st.stop()
 
-tasks = repo.list_tasks()
 
-st.subheader("Saved tasks")
-if not tasks:
-    st.info("No saved tasks yet. Use the form below to create one.")
-else:
-    for item in tasks:
+def _render_task_list(items: list[dict], *, empty_message: str) -> None:
+    if not items:
+        st.info(empty_message)
+        return
+    for item in items:
         objective = (item.get("task") or "")[:90]
-        st.markdown(f"**{item['title']}**  \n{objective}{'…' if len(item.get('task') or '') > 90 else ''}")
-        st.caption(f"Updated {item.get('updated_at', '')} · format: {item.get('output_format')}")
+        suffix = "…" if len(item.get("task") or "") > 90 else ""
+        st.markdown(f"**{item['title']}**  \n{objective}{suffix}")
+        source = item.get("source") or "user"
+        updated = item.get("updated_at")
+        meta_parts = [f"source: {source}", f"format: {item.get('output_format')}"]
+        if updated:
+            meta_parts.insert(0, f"Updated {updated}")
+        st.caption(" · ".join(meta_parts))
         st.divider()
+
+
+system_tasks = list_system_tasks()
+user_tasks = repo.list_tasks()
+
+st.subheader("System / demo tasks")
+st.caption("Built-in workshop samples. View only — they cannot be edited or deleted here.")
+_render_task_list(system_tasks, empty_message="No system tasks configured.")
+
+st.subheader("Your tasks")
+st.caption("Templates you created. Edit or delete them with the form below.")
+_render_task_list(user_tasks, empty_message="No saved tasks yet. Use the form below to create one.")
 
 st.subheader("Add or edit a task")
 options = {"(create new)": None}
-for item in tasks:
+for item in user_tasks:
     options[f"{item['title']} ({item['id'][:8]})"] = item["id"]
 
-choice_label = st.selectbox("Select task to edit", options=list(options.keys()), key="tm_select")
+choice_label = st.selectbox("Select your task to edit", options=list(options.keys()), key="tm_select")
 selected_id = options[choice_label]
 selected = repo.get_task(selected_id) if selected_id else None
 
@@ -104,7 +122,7 @@ if save_clicked:
     except Exception as exc:  # noqa: BLE001
         st.error(f"Could not save task: {exc}")
 
-if selected_id:
+if selected_id and selected and selected.get("source") != "system":
     st.subheader("Delete task")
     confirm = st.checkbox("I understand this permanently deletes the selected saved task")
     if st.button("Delete selected task", type="primary", disabled=not confirm):
@@ -112,4 +130,4 @@ if selected_id:
             st.success("Task deleted.")
             st.rerun()
         else:
-            st.error("Task was not found or already deleted.")
+            st.error("Task was not found, already deleted, or is a protected system task.")

@@ -11,7 +11,7 @@ pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
-STUDIO_PAGE = ROOT / "pages" / "1_Workforce_Studio.py"
+STUDIO_PAGE = ROOT / "pages" / "2_Workforce_Studio.py"
 
 
 def test_workforce_studio_loads_demo_mode():
