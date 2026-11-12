@@ -23,11 +23,25 @@ from src.providers.llm_base import LLMProvider
 from src.providers.search_base import SearchProvider
 
 
+# Pause between these nodes so Streamlit can honour Pause without mid-HTTP cancel.
+STAGE_INTERRUPT_AFTER = [
+    "validate",
+    "specify",
+    "research",
+    "planning",
+    "execution",
+    "review",
+    "bump_revision",
+]
+
+
 def build_workforce_graph(
     provider: LLMProvider,
     *,
     search_provider: SearchProvider | None = None,
     prompt_overrides: dict[str, str] | None = None,
+    checkpointer: Any | None = None,
+    interrupt_after: list[str] | None = None,
 ):
     ctx = NodeContext(
         provider,
@@ -74,7 +88,12 @@ def build_workforce_graph(
     )
     graph.add_edge("bump_revision", "execution")
     graph.add_edge("await_human", END)
-    return graph.compile()
+    kwargs: dict[str, Any] = {}
+    if checkpointer is not None:
+        kwargs["checkpointer"] = checkpointer
+    if interrupt_after is not None:
+        kwargs["interrupt_after"] = interrupt_after
+    return graph.compile(**kwargs)
 
 
 def initial_state(

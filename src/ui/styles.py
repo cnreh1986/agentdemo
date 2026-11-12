@@ -19,7 +19,8 @@ APP_CSS = """
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 999;
+  z-index: 40;
+  pointer-events: none;
   background: #F8FAFC;
   border-top: 1px solid #CBD5E1;
   color: #475569;
@@ -44,6 +45,19 @@ section.main .block-container {
 .chip-run { background: #DBEAFE; color: #1E40AF; }
 .chip-warn { background: #FEF3C7; color: #92400E; }
 .chip-err { background: #FEE2E2; color: #991B1B; }
+.pipe-node.Paused { background: #FEF3C7; color: #92400E; }
+.run-notice {
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0 1rem 0;
+  border-left: 4px solid #64748B;
+  background: #F1F5F9;
+  color: #0F172A;
+}
+.run-notice.info { border-left-color: #2563EB; background: #EFF6FF; }
+.run-notice.success { border-left-color: #059669; background: #ECFDF5; }
+.run-notice.warning { border-left-color: #D97706; background: #FFFBEB; }
+.run-notice.error { border-left-color: #DC2626; background: #FEF2F2; }
 .agent-card {
   border: 1px solid #CBD5E1; border-radius: 12px; padding: 0.85rem 1rem;
   background: white; min-height: 118px;
@@ -101,6 +115,65 @@ section.main .block-container {
   border: 1px solid #6EE7B7;
   margin: 0.35rem 0 0.85rem 0;
 }
+.landing-page {
+  max-width: 960px;
+}
+.landing-hero {
+  margin: 0.25rem 0 1.5rem 0;
+  padding: 1.25rem 1.35rem 1.4rem 1.35rem;
+  border-radius: 16px;
+  background: linear-gradient(165deg, #F0FDFA 0%, #F8FAFC 48%, #FFFFFF 100%);
+  border: 1px solid #CCFBF1;
+}
+.landing-brand {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0F172A;
+  margin: 0.55rem 0 0.35rem 0;
+  line-height: 1.15;
+}
+.landing-tagline {
+  color: #0D9488;
+  font-weight: 700;
+  font-size: 1.15rem;
+  margin-bottom: 0.75rem;
+}
+.landing-lede {
+  color: #334155;
+  font-size: 1.02rem;
+  line-height: 1.55;
+  margin: 0 0 0.65rem 0;
+  max-width: 42rem;
+}
+.landing-safety {
+  background: #FFF7ED;
+  border-left: 4px solid #F59E0B;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin: 0.85rem 0 1.25rem 0;
+  color: #334155;
+}
+.landing-page h2 {
+  color: #0F172A;
+  margin-top: 1.75rem;
+  margin-bottom: 0.65rem;
+}
+.landing-page h3 {
+  color: #0F172A;
+  margin-top: 1.1rem;
+  font-size: 1.05rem;
+}
+.landing-shot {
+  margin: 0.35rem 0 0.5rem 0;
+}
+.landing-shot img {
+  max-width: 520px;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+}
 </style>
 """
 
@@ -111,7 +184,13 @@ def chip_class(status: str) -> str:
         return "chip-ok"
     if s in {"running", "queued", "revision_running"}:
         return "chip-run"
-    if s in {"needs revision", "revision_required", "awaiting", "awaiting_human_approval"}:
+    if s in {
+        "needs revision",
+        "revision_required",
+        "awaiting",
+        "awaiting_human_approval",
+        "paused",
+    }:
         return "chip-warn"
     if s in {"failed", "error", "human_rejected", "rejected"}:
         return "chip-err"

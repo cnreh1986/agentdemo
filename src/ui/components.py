@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
@@ -13,7 +15,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 LOGO_PATH = _ROOT / "assets" / "the_product_room_logo.jpg"
 EDITION_LINE = "Product Room, 28/11/2026 Second Edition"
 FOOTER_LINE = (
-    "Thank you from Product Room Team — Nadia, Rachana, Atul, Venkat, Harmeet, Salman,Nadeem."
+    "Thank you from Product Room Team — Nadia, Rachana, Atul, Venkat, Harmeet, Salman, Nadeem."
 )
 
 
@@ -22,8 +24,12 @@ def logo_path() -> str:
     return str(LOGO_PATH)
 
 
-def render_page_brand() -> None:
+def render_page_brand(*, show_home_link: bool = True, show_page_brand: bool = True) -> None:
     """Logo + edition line in the main content area (all pages)."""
+    if show_home_link:
+        st.page_link("pages/0_Home_Page.py", label="Home Page", icon=":material/home:")
+    if not show_page_brand:
+        return
     if LOGO_PATH.is_file():
         st.image(logo_path(), width=96)
     st.markdown(
@@ -37,12 +43,50 @@ def render_page_footer() -> None:
     st.markdown(f'<div class="app-footer">{FOOTER_LINE}</div>', unsafe_allow_html=True)
 
 
-def inject_styles() -> None:
+def inject_styles(*, show_home_link: bool = True, show_page_brand: bool = True) -> None:
     st.markdown(APP_CSS, unsafe_allow_html=True)
     if LOGO_PATH.is_file():
         st.logo(logo_path(), size="large")
-    render_page_brand()
+    render_page_brand(show_home_link=show_home_link, show_page_brand=show_page_brand)
     render_page_footer()
+
+
+def queue_run_notice(
+    message: str,
+    *,
+    level: str = "info",
+    run_id: str | None = None,
+) -> None:
+    """Store one in-session completion notice (toast + dismissible banner)."""
+    safe_level = level if level in {"info", "success", "warning", "error"} else "info"
+    st.session_state.run_notice = {
+        "message": message,
+        "level": safe_level,
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "dismissed": False,
+        "toast_shown": False,
+    }
+
+
+def render_run_notice() -> None:
+    notice: dict[str, Any] | None = st.session_state.get("run_notice")
+    if not notice or notice.get("dismissed"):
+        return
+    message = str(notice.get("message") or "")
+    level = str(notice.get("level") or "info")
+    if not notice.get("toast_shown"):
+        st.toast(message)
+        notice["toast_shown"] = True
+        st.session_state.run_notice = notice
+    st.markdown(
+        f'<div class="run-notice {level}">{message}</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Dismiss notice", key="dismiss_run_notice"):
+        notice["dismissed"] = True
+        st.session_state.run_notice = notice
+        st.rerun()
 
 
 def render_header() -> None:

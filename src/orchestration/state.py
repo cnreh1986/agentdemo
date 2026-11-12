@@ -36,6 +36,7 @@ class WorkforceState(TypedDict, total=False):
     approval_status: str | None
     approval_note: str | None
     approval_at: str | None
+    paused_after_stage: str | None
     demo_disclaimer: str | None
     model_configuration: dict[str, Any]
     created_at: str

@@ -7,13 +7,15 @@ from typing import Any, Callable
 
 from src.config.settings import get_settings
 from src.orchestration.events import make_event
-from src.orchestration.runner import WorkforceRunner
+from src.orchestration.runner import WorkforceRunner, mark_paused, review_is_clean
 from src.providers.demo_provider import DemoProvider
-from src.providers.litellm_provider import LiteLLMProvider
 from src.providers.firecrawl_search import FirecrawlSearchProvider
+from src.providers.litellm_provider import LiteLLMProvider
 from src.providers.search_base import NullSearchProvider
 
 UpdateCallback = Callable[[dict[str, Any]], None]
+
+AUTO_APPROVE_NOTE = "Auto-approved from user setting"
 
 
 class RunService:
@@ -34,6 +36,22 @@ class RunService:
             return FirecrawlSearchProvider(self.settings)
         return NullSearchProvider()
 
+    def _runner(self, mode: str) -> WorkforceRunner:
+        return WorkforceRunner(
+            self._provider(mode),
+            search_provider=self._search(mode),
+            prompt_overrides=self.prompt_overrides,
+            max_revisions=self.settings.max_revisions,
+        )
+
+    def _ensure_live_ready(self, mode: str) -> None:
+        if mode == "live" and not self.settings.has_llm_credentials:
+            raise RuntimeError(
+                "Live LLM Mode requires provider credentials. "
+                "Configure OPENAI_API_KEY (or matching provider key). "
+                "The app will not fall back to Demo Mode."
+            )
+
     def start_run(
         self,
         *,
@@ -45,19 +63,8 @@ class RunService:
         mode: str = "demo",
         on_update: UpdateCallback | None = None,
     ) -> dict[str, Any]:
-        if mode == "live" and not self.settings.has_llm_credentials:
-            raise RuntimeError(
-                "Live LLM Mode requires provider credentials. "
-                "Configure OPENAI_API_KEY (or matching provider key). "
-                "The app will not fall back to Demo Mode."
-            )
-        runner = WorkforceRunner(
-            self._provider(mode),
-            search_provider=self._search(mode),
-            prompt_overrides=self.prompt_overrides,
-            max_revisions=self.settings.max_revisions,
-        )
-        return runner.run(
+        self._ensure_live_ready(mode)
+        return self._runner(mode).run(
             task=task,
             background=background,
             constraints=constraints,
@@ -66,6 +73,53 @@ class RunService:
             mode=mode,
             on_update=on_update,
         )
+
+    def begin_run(
+        self,
+        *,
+        task: str,
+        background: str = "",
+        constraints: str = "",
+        time_horizon: str = "",
+        output_format: str = "Briefing",
+        mode: str = "demo",
+        on_update: UpdateCallback | None = None,
+    ) -> dict[str, Any]:
+        """Start a run and return after the first stage boundary."""
+        self._ensure_live_ready(mode)
+        return self._runner(mode).begin_run(
+            task=task,
+            background=background,
+            constraints=constraints,
+            time_horizon=time_horizon,
+            output_format=output_format,
+            mode=mode,
+            on_update=on_update,
+        )
+
+    def advance_run(
+        self,
+        run_state: dict[str, Any],
+        *,
+        on_update: UpdateCallback | None = None,
+    ) -> dict[str, Any]:
+        """Advance one stage for an in-progress or paused run (same run_id)."""
+        mode = run_state.get("mode") or "demo"
+        self._ensure_live_ready(mode)
+        run_id = run_state["run_id"]
+        runner = self._runner(mode)
+        return runner.continue_run(run_id, on_update=on_update)
+
+    def run_has_more_stages(self, run_state: dict[str, Any]) -> bool:
+        mode = run_state.get("mode") or "demo"
+        return self._runner(mode).run_is_complete(run_state["run_id"]) is False
+
+    def pause_run(self, run_state: dict[str, Any]) -> dict[str, Any]:
+        return mark_paused(run_state)
+
+    @staticmethod
+    def can_auto_approve(run_state: dict[str, Any]) -> bool:
+        return review_is_clean(run_state)
 
     def apply_human_decision(
         self,
@@ -88,14 +142,20 @@ class RunService:
             node_states["human_approval"] = "Completed"
             state["node_states"] = node_states
             events = list(state.get("events") or [])
+            if note == AUTO_APPROVE_NOTE:
+                message = "Auto-approved from user setting."
+            else:
+                message = "Human approved the deliverable for personal use (no external action)."
             events.append(
                 make_event(
                     run_id=state["run_id"],
                     stage="human_approval",
                     event_type="human_approved",
                     status="approved",
-                    message="Human approved the deliverable for personal use (no external action).",
-                    metadata={"note": note} if note else {},
+                    message=message,
+                    metadata={"note": note, "auto_approve": note == AUTO_APPROVE_NOTE}
+                    if note
+                    else {},
                 )
             )
             state["events"] = events
@@ -138,12 +198,7 @@ class RunService:
             )
             state["events"] = events
             mode = state.get("mode", "demo")
-            runner = WorkforceRunner(
-                self._provider(mode),
-                search_provider=self._search(mode),
-                prompt_overrides=self.prompt_overrides,
-                max_revisions=int(state.get("max_revisions") or self.settings.max_revisions),
-            )
+            runner = self._runner(mode)
             return runner.run(
                 task=state["task_input"]["task"],
                 mode=mode,

@@ -104,6 +104,8 @@ def progress_fraction(run_state: dict[str, Any] | None) -> float:
     status = (run_state or {}).get("status") or ""
     if status in {"AWAITING_HUMAN_APPROVAL", "HUMAN_APPROVED"}:
         return 1.0
+    if status == "PAUSED":
+        return min(0.9, (completed + 0.2) / len(_PIPELINE_KEYS))
     if status == "FAILED":
         return min(0.95, completed / len(_PIPELINE_KEYS))
     return min(0.95, (completed + (0.35 if any(node_states.get(k) == "Running" for k in _PIPELINE_KEYS) else 0)) / len(_PIPELINE_KEYS))
@@ -121,7 +123,7 @@ def active_stage_key(run_state: dict[str, Any] | None) -> str:
     if current == "human":
         return "human_approval"
     for key in reversed(_PIPELINE_KEYS):
-        if node_states.get(key) in {"Completed", "Needs revision", "Failed", "Queued"}:
+        if node_states.get(key) in {"Completed", "Needs revision", "Failed", "Queued", "Paused"}:
             return key
     return "orchestrator"
 
@@ -350,6 +352,16 @@ def render_agent_activity_overlay(
                 ):
                     st.session_state.show_agent_overlay = False
                     st.session_state.agent_overlay_minimized = False
+                    st.rerun()
+            elif not running and status == "PAUSED":
+                if st.button(
+                    "Start (resume)",
+                    type="primary",
+                    key="overlay_resume",
+                    use_container_width=True,
+                ):
+                    st.session_state.pause_requested = False
+                    st.session_state.run_continue = True
                     st.rerun()
             elif not running and status in {"FAILED", "CANCELLED", "HUMAN_APPROVED", "HUMAN_REJECTED"}:
                 if st.button("Close", key="overlay_close", use_container_width=True):

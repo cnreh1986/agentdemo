@@ -10,14 +10,16 @@ from src.config.samples import OUTPUT_FORMATS, SAMPLE_TASK_LABELS, SAMPLE_TASKS
 from src.config.settings import get_settings
 from src.config.validation import validate_task_input
 from src.services.export_service import ExportService
-from src.services.run_service import RunService
+from src.services.run_service import AUTO_APPROVE_NOTE, RunService
 from src.ui.agent_activity_overlay import render_agent_activity_overlay
 from src.ui.agent_cards import render_agent_cards
 from src.ui.components import (
     inject_styles,
     logo_path,
+    queue_run_notice,
     render_header,
     render_mode_status,
+    render_run_notice,
     render_sensitive_warning,
 )
 from src.ui.output_views import render_agent_inspector, render_approval_panel, render_output_tabs
@@ -36,6 +38,11 @@ settings = get_settings()
 for key, default in {
     "run_state": None,
     "run_in_progress": False,
+    "run_continue": False,
+    "ready_for_next_stage": False,
+    "pause_requested": False,
+    "auto_approve_enabled": False,
+    "run_notice": None,
     "show_agent_overlay": False,
     "agent_overlay_minimized": False,
     "task_text": "",
@@ -51,6 +58,19 @@ for key, default in {
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+_ACTIVE_STATUSES = {
+    "AWAITING_HUMAN_APPROVAL",
+    "PAUSED",
+    "TASK_RECEIVED",
+    "TASK_VALIDATED",
+    "SPECIFICATION_CREATED",
+    "RESEARCH_RUNNING",
+    "PLANNING_RUNNING",
+    "EXECUTION_RUNNING",
+    "REVIEW_RUNNING",
+    "REVISION_RUNNING",
+}
 
 
 def _clear_overlay_flags() -> None:
@@ -69,31 +89,32 @@ def _start_new_task() -> None:
     st.session_state._loaded_sample = None
     st.session_state.run_state = None
     st.session_state.run_in_progress = False
+    st.session_state.run_continue = False
+    st.session_state.ready_for_next_stage = False
+    st.session_state.pause_requested = False
     st.session_state.confirm_reset = False
     _clear_overlay_flags()
 
 
 def _request_reset() -> None:
-    active = st.session_state.run_state and st.session_state.run_state.get("status") in {
-        "AWAITING_HUMAN_APPROVAL",
-        "TASK_RECEIVED",
-        "RESEARCH_RUNNING",
-        "PLANNING_RUNNING",
-        "EXECUTION_RUNNING",
-        "REVIEW_RUNNING",
-        "REVISION_RUNNING",
-    }
+    active = st.session_state.run_state and st.session_state.run_state.get("status") in _ACTIVE_STATUSES
     if active:
         st.session_state.confirm_reset = True
     else:
         st.session_state.run_state = None
         st.session_state.run_in_progress = False
+        st.session_state.run_continue = False
+        st.session_state.ready_for_next_stage = False
+        st.session_state.pause_requested = False
         _clear_overlay_flags()
 
 
 def _confirm_reset() -> None:
     st.session_state.run_state = None
     st.session_state.run_in_progress = False
+    st.session_state.run_continue = False
+    st.session_state.ready_for_next_stage = False
+    st.session_state.pause_requested = False
     st.session_state.confirm_reset = False
     _clear_overlay_flags()
 
@@ -139,8 +160,109 @@ def _bump_export() -> None:
         pass
 
 
+def _queue_terminal_notice(state: dict, *, auto_approved: bool = False) -> None:
+    status = state.get("status") or ""
+    run_id = state.get("run_id")
+    if auto_approved or status == "HUMAN_APPROVED" and (state.get("approval_note") == AUTO_APPROVE_NOTE):
+        queue_run_notice(
+            "Workforce finished and was auto-approved.",
+            level="success",
+            run_id=run_id,
+        )
+        return
+    if status == "AWAITING_HUMAN_APPROVAL":
+        queue_run_notice(
+            "Workforce finished. Your approval is waiting.",
+            level="info",
+            run_id=run_id,
+        )
+        return
+    if status == "FAILED":
+        stage = state.get("current_stage") or "unknown"
+        err = state.get("error") or "Unknown error"
+        queue_run_notice(
+            f"Workforce failed at {stage}: {err}",
+            level="error",
+            run_id=run_id,
+        )
+        return
+    if status == "PAUSED":
+        stage = state.get("paused_after_stage") or state.get("current_stage") or "stage"
+        queue_run_notice(
+            f"Paused after {stage}. Resume when ready.",
+            level="warning",
+            run_id=run_id,
+        )
+
+
+def _maybe_auto_approve(service: RunService, state: dict) -> tuple[dict, bool]:
+    if not st.session_state.auto_approve_enabled:
+        return state, False
+    if not RunService.can_auto_approve(state):
+        return state, False
+    updated = service.apply_human_decision(
+        state,
+        decision="approve",
+        note=AUTO_APPROVE_NOTE,
+    )
+    return updated, True
+
+
+def _finalize_stage_result(service: RunService, result: dict, *, more_stages: bool) -> None:
+    """Persist stage result; pause, continue, or finish with notices / auto-approve."""
+    if (result.get("status") or "") == "FAILED" or not more_stages:
+        if (result.get("status") or "") != "FAILED":
+            result, auto = _maybe_auto_approve(service, result)
+        else:
+            auto = False
+        st.session_state.run_state = result
+        _persist(result)
+        _queue_terminal_notice(result, auto_approved=auto)
+        st.session_state.run_in_progress = False
+        st.session_state.run_continue = False
+        st.session_state.ready_for_next_stage = False
+        st.session_state.pause_requested = False
+        if auto:
+            _clear_overlay_flags()
+        return
+
+    if st.session_state.pause_requested:
+        paused = service.pause_run(result)
+        st.session_state.run_state = paused
+        _persist(paused)
+        _queue_terminal_notice(paused)
+        st.session_state.run_in_progress = False
+        st.session_state.run_continue = False
+        st.session_state.ready_for_next_stage = False
+        st.session_state.pause_requested = False
+        return
+
+    # Leave a short interactive gap so Pause can be clicked before the next stage.
+    st.session_state.run_state = result
+    _persist(result)
+    st.session_state.run_in_progress = False
+    st.session_state.run_continue = False
+    st.session_state.ready_for_next_stage = True
+
+
+def _run_overlay_callback(slot):
+    def on_update(state: dict) -> None:
+        st.session_state.run_state = copy.deepcopy(state)
+        if not st.session_state.agent_overlay_minimized:
+            with slot.container():
+                render_agent_activity_overlay(
+                    state,
+                    running=True,
+                    revision=int(state.get("revision_count") or 0) > 0,
+                    show_actions=False,
+                )
+
+    return on_update
+
+
 render_header()
 render_sensitive_warning()
+render_run_notice()
 
 mode = st.radio(
     "Execution mode",
@@ -200,15 +322,88 @@ st.caption(
     "Manage saved templates on the **Task Manager** page. **New Task** clears the form."
 )
 
-c_run, c_new, c_reset, _ = st.columns([1.2, 1, 1, 2])
+st.checkbox(
+    "Auto-approve when ready (skips the Approve button for this session)",
+    key="auto_approve_enabled",
+)
+st.caption(
+    "Off by default. When enabled, a clean finished run is approved for you and recorded "
+    "in the activity feed as coming from this setting."
+)
+
+run_state_preview = st.session_state.run_state
+paused_now = bool(run_state_preview and run_state_preview.get("status") == "PAUSED")
+busy = (
+    st.session_state.run_in_progress
+    or st.session_state.run_continue
+    or st.session_state.ready_for_next_stage
+)
+between_stages = bool(st.session_state.ready_for_next_stage)
+
+c_run, c_pause, c_start, c_new, c_reset = st.columns([1.2, 1, 1, 1, 1])
 run_clicked = c_run.button(
     "Run Workforce",
     type="primary",
-    disabled=st.session_state.run_in_progress,
+    disabled=busy or paused_now,
     use_container_width=True,
+)
+pause_clicked = c_pause.button(
+    "Pause",
+    disabled=(
+        paused_now
+        or (run_state_preview or {}).get("status")
+        in {"AWAITING_HUMAN_APPROVAL", "HUMAN_APPROVED", "HUMAN_REJECTED", "FAILED"}
+        or not (between_stages or st.session_state.run_in_progress or st.session_state.run_continue)
+    ),
+    use_container_width=True,
+)
+start_clicked = c_start.button(
+    "Start",
+    disabled=not paused_now or st.session_state.run_in_progress,
+    use_container_width=True,
+    help="Resume a paused run with the same run id",
 )
 c_new.button("New Task", use_container_width=True, on_click=_start_new_task)
 c_reset.button("Reset", use_container_width=True, on_click=_request_reset)
+
+if pause_clicked:
+    st.session_state.pause_requested = True
+    if between_stages and st.session_state.run_state:
+        service = RunService(prompt_overrides=st.session_state.prompt_overrides)
+        paused = service.pause_run(st.session_state.run_state)
+        st.session_state.run_state = paused
+        _persist(paused)
+        _queue_terminal_notice(paused)
+        st.session_state.ready_for_next_stage = False
+        st.session_state.run_continue = False
+        st.session_state.pause_requested = False
+        st.rerun()
+    st.info("Pause requested — will stop after the current agent stage finishes.")
+
+if start_clicked and paused_now:
+    st.session_state.pause_requested = False
+    st.session_state.ready_for_next_stage = False
+    st.session_state.run_continue = True
+    st.session_state.show_agent_overlay = True
+    st.session_state.agent_overlay_minimized = False
+    st.rerun()
+
+if between_stages and not paused_now:
+    st.info(
+        "Agent stage finished. Click **Pause** to stop, or wait a moment for the next agent to start."
+    )
+
+    @st.fragment(run_every=1.2)
+    def _auto_advance_fragment() -> None:
+        if not st.session_state.get("ready_for_next_stage"):
+            return
+        if st.session_state.get("pause_requested"):
+            return
+        st.session_state.ready_for_next_stage = False
+        st.session_state.run_continue = True
+        st.rerun()
+
+    _auto_advance_fragment()
 
 with st.expander("Optional context, constraints, and preferences"):
     st.text_area("Background / context", key="background_text", height=80)
@@ -225,7 +420,50 @@ if st.session_state.confirm_reset:
     st.button("Confirm reset", on_click=_confirm_reset)
     st.button("Cancel reset", on_click=_cancel_reset)
 
-if run_clicked and not st.session_state.run_in_progress:
+# --- Stage continuation (one agent stage per script run) ---
+if st.session_state.run_continue and st.session_state.run_state and not st.session_state.run_in_progress:
+    st.session_state.run_continue = False
+    service = RunService(prompt_overrides=st.session_state.prompt_overrides)
+    current = st.session_state.run_state
+
+    if st.session_state.pause_requested and (current.get("status") or "") != "PAUSED":
+        paused = service.pause_run(current)
+        st.session_state.run_state = paused
+        _persist(paused)
+        _queue_terminal_notice(paused)
+        st.session_state.pause_requested = False
+        st.rerun()
+
+    if (current.get("status") or "") == "PAUSED" and not st.session_state.pause_requested:
+        # Resuming: keep checkpoint; clear PAUSED label for UI until next snapshot
+        current = dict(current)
+        current["status"] = "REVISION_RUNNING" if int(current.get("revision_count") or 0) else "TASK_RECEIVED"
+        st.session_state.run_state = current
+
+    st.session_state.run_in_progress = True
+    st.session_state.show_agent_overlay = True
+    overlay_slot = st.empty()
+    try:
+        result = service.advance_run(
+            st.session_state.run_state,
+            on_update=_run_overlay_callback(overlay_slot),
+        )
+        more = service.run_has_more_stages(result) and (result.get("status") or "") != "FAILED"
+        _finalize_stage_result(service, result, more_stages=more)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Run failed: {exc}")
+        failed = dict(st.session_state.run_state or {})
+        failed["status"] = "FAILED"
+        failed["error"] = str(exc)
+        st.session_state.run_state = failed
+        _persist(failed)
+        _queue_terminal_notice(failed)
+        st.session_state.run_in_progress = False
+        st.session_state.run_continue = False
+        st.session_state.ready_for_next_stage = False
+    st.rerun()
+
+if run_clicked and not st.session_state.run_in_progress and not paused_now:
     validation = validate_task_input(
         st.session_state.task_text,
         st.session_state.background_text,
@@ -243,22 +481,12 @@ if run_clicked and not st.session_state.run_in_progress:
             "The app will not silently switch to Demo Mode."
         )
     else:
+        st.session_state.pause_requested = False
+        st.session_state.run_continue = False
         st.session_state.run_in_progress = True
         st.session_state.show_agent_overlay = True
         st.session_state.agent_overlay_minimized = False
         overlay_slot = st.empty()
-
-        def on_update(state: dict) -> None:
-            st.session_state.run_state = copy.deepcopy(state)
-            if not st.session_state.agent_overlay_minimized:
-                with overlay_slot.container():
-                    render_agent_activity_overlay(
-                        state,
-                        running=True,
-                        revision=int(state.get("revision_count") or 0) > 0,
-                        show_actions=False,
-                    )
-
         try:
             service = RunService(prompt_overrides=st.session_state.prompt_overrides)
             if settings.persistence_enabled:
@@ -268,25 +496,17 @@ if run_clicked and not st.session_state.run_in_progress:
                     RunRepository().increment_metric("runs_started")
                 except Exception:
                     pass
-            result = service.start_run(
+            result = service.begin_run(
                 task=validation.task,
                 background=validation.background,
                 constraints=validation.constraints,
                 time_horizon=validation.time_horizon,
                 output_format=validation.output_format,
                 mode=mode,
-                on_update=on_update,
+                on_update=_run_overlay_callback(overlay_slot),
             )
-            st.session_state.run_state = result
-            _persist(result)
-            if not st.session_state.agent_overlay_minimized:
-                with overlay_slot.container():
-                    render_agent_activity_overlay(
-                        result,
-                        running=False,
-                        revision=int(result.get("revision_count") or 0) > 0,
-                        show_actions=False,
-                    )
+            more = service.run_has_more_stages(result) and (result.get("status") or "") != "FAILED"
+            _finalize_stage_result(service, result, more_stages=more)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Run failed: {exc}")
             if st.session_state.run_state is None:
@@ -297,16 +517,16 @@ if run_clicked and not st.session_state.run_in_progress:
                     "node_states": {},
                 }
             else:
-                _persist(st.session_state.run_state)
-            if not st.session_state.agent_overlay_minimized:
-                with overlay_slot.container():
-                    render_agent_activity_overlay(
-                        st.session_state.run_state,
-                        running=False,
-                        show_actions=False,
-                    )
-        finally:
+                failed = dict(st.session_state.run_state)
+                failed["status"] = "FAILED"
+                failed["error"] = str(exc)
+                st.session_state.run_state = failed
+                _persist(failed)
+            _queue_terminal_notice(st.session_state.run_state)
             st.session_state.run_in_progress = False
+            st.session_state.run_continue = False
+            st.session_state.ready_for_next_stage = False
+        st.rerun()
 
 run_state = st.session_state.run_state
 
@@ -349,6 +569,8 @@ with right:
             f"**Stage:** `{run_state.get('current_stage')}` · "
             f"**Revisions:** {run_state.get('revision_count', 0)}/{run_state.get('max_revisions', 1)}"
         )
+        if run_state.get("paused_after_stage"):
+            st.caption(f"Paused after: `{run_state.get('paused_after_stage')}`")
         if run_state.get("task_specification"):
             with st.expander("Task specification", expanded=False):
                 st.json(run_state["task_specification"])
@@ -387,8 +609,12 @@ if action and run_state:
                     note=action.get("note") or "",
                     on_update=on_revision_update,
                 )
+                updated, auto = _maybe_auto_approve(service, updated)
                 st.session_state.run_state = updated
                 _persist(updated)
+                _queue_terminal_notice(updated, auto_approved=auto)
+                if auto:
+                    _clear_overlay_flags()
             finally:
                 st.session_state.run_in_progress = False
             st.rerun()
