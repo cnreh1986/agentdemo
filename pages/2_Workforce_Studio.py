@@ -15,6 +15,7 @@ from src.ui.agent_activity_overlay import render_agent_activity_overlay
 from src.ui.agent_cards import render_agent_cards
 from src.ui.components import (
     inject_styles,
+    logo_path,
     render_header,
     render_mode_status,
     render_sensitive_warning,
@@ -24,7 +25,7 @@ from src.ui.workflow_view import render_event_feed, render_pipeline
 
 st.set_page_config(
     page_title="Workforce Studio",
-    page_icon="🤖",
+    page_icon=logo_path(),
     layout="wide",
     initial_sidebar_state="expanded",
 )

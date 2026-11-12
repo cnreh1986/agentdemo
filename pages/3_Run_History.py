@@ -5,11 +5,11 @@ from __future__ import annotations
 import streamlit as st
 
 from src.config.settings import get_settings
-from src.ui.components import inject_styles
+from src.ui.components import inject_styles, logo_path
 from src.ui.output_views import render_agent_inspector, render_output_tabs
 from src.ui.workflow_view import render_event_feed, render_pipeline
 
-st.set_page_config(page_title="Run History", page_icon="📂", layout="wide")
+st.set_page_config(page_title="Run History", page_icon=logo_path(), layout="wide")
 inject_styles()
 settings = get_settings()
 st.title("Run History")

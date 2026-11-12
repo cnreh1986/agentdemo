@@ -2,17 +2,51 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from src.config.settings import Settings
 from src.ui.styles import APP_CSS, chip_class
 
+_ROOT = Path(__file__).resolve().parents[2]
+LOGO_PATH = _ROOT / "assets" / "the_product_room_logo.jpg"
+EDITION_LINE = "Product Room, 28/11/2026 Second Edition"
+FOOTER_LINE = (
+    "Thank you from Product Room Team — Nadia, Rachana, Atul, Venkat, Harmeet, Salman,Nadeem."
+)
+
+
+def logo_path() -> str:
+    """Absolute path to The Product Room logo (for page_icon / st.logo / st.image)."""
+    return str(LOGO_PATH)
+
+
+def render_page_brand() -> None:
+    """Logo + edition line in the main content area (all pages)."""
+    if LOGO_PATH.is_file():
+        st.image(logo_path(), width=96)
+    st.markdown(
+        f'<div class="page-brand"><div class="edition-line">{EDITION_LINE}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_footer() -> None:
+    """Fixed thank-you footer on every page."""
+    st.markdown(f'<div class="app-footer">{FOOTER_LINE}</div>', unsafe_allow_html=True)
+
 
 def inject_styles() -> None:
     st.markdown(APP_CSS, unsafe_allow_html=True)
+    if LOGO_PATH.is_file():
+        st.logo(logo_path(), size="large")
+    render_page_brand()
+    render_page_footer()
 
 
 def render_header() -> None:
+    # Logo + edition line already rendered by inject_styles / render_page_brand.
     st.markdown(
         """
         <div class="main-header">

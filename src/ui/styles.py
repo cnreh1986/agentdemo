@@ -2,6 +2,36 @@
 
 APP_CSS = """
 <style>
+.page-brand {
+  margin: 0 0 0.85rem 0;
+}
+.page-brand img {
+  margin-bottom: 0.25rem;
+}
+.edition-line {
+  color: #475569;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0.15rem 0 0.35rem 0;
+}
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  background: #F8FAFC;
+  border-top: 1px solid #CBD5E1;
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 0.65rem 1rem;
+  box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
+}
+section.main .block-container {
+  padding-bottom: 4.5rem;
+}
 .main-header h1 { margin-bottom: 0.15rem; color: #0F172A; }
 .tagline { color: #0D9488; font-weight: 600; font-size: 1.05rem; margin-bottom: 0.5rem; }
 .explainer { color: #334155; margin-bottom: 1rem; }

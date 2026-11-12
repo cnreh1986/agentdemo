@@ -6,9 +6,9 @@ import streamlit as st
 
 from src.config.prompts import PROMPTS
 from src.ui.agent_cards import AGENTS
-from src.ui.components import inject_styles
+from src.ui.components import inject_styles, logo_path
 
-st.set_page_config(page_title="Agent Lab", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="Agent Lab", page_icon=logo_path(), layout="wide")
 inject_styles()
 st.title("Agent Lab")
 st.write(

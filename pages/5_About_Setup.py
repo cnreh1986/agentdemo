@@ -5,9 +5,9 @@ from __future__ import annotations
 import streamlit as st
 
 from src.config.settings import get_settings
-from src.ui.components import inject_styles, render_mode_status
+from src.ui.components import inject_styles, logo_path, render_mode_status
 
-st.set_page_config(page_title="About & Setup", page_icon="ℹ️", layout="wide")
+st.set_page_config(page_title="About & Setup", page_icon=logo_path(), layout="wide")
 inject_styles()
 settings = get_settings()
 

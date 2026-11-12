@@ -6,9 +6,9 @@ import streamlit as st
 
 from src.config.samples import OUTPUT_FORMATS, list_system_tasks
 from src.config.settings import get_settings
-from src.ui.components import inject_styles
+from src.ui.components import inject_styles, logo_path
 
-st.set_page_config(page_title="Task Manager", page_icon="🗂️", layout="wide")
+st.set_page_config(page_title="Task Manager", page_icon=logo_path(), layout="wide")
 inject_styles()
 settings = get_settings()
 
