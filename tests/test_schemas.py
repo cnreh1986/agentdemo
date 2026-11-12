@@ -1,10 +1,7 @@
-import pytest
-from pydantic import ValidationError
-
 from src.demo.fixtures import build_demo_packets
 from src.models.deliverable import Deliverable
 from src.models.plan import Plan
-from src.models.research import EvidenceItem, ResearchPacket
+from src.models.research import ResearchPacket
 from src.models.review import ReviewReport
 from src.models.task import TaskSpec
 from src.orchestration.events import make_event, sanitize_value
@@ -20,11 +17,15 @@ def test_fixtures_validate_against_schemas():
     ReviewReport.model_validate(packets["review_v2"])
 
 
-def test_invalid_review_score_rejected():
-    with pytest.raises(ValidationError):
-        ReviewReport.model_validate(
-            {"status": "approved", "quality_score": 150, "reviewer_summary": "bad"}
-        )
+def test_out_of_range_review_score_is_clamped():
+    report = ReviewReport.model_validate(
+        {"status": "approved", "quality_score": 150, "reviewer_summary": "ok"}
+    )
+    assert report.quality_score == 100
+    low = ReviewReport.model_validate(
+        {"status": "approved", "quality_score": -5, "reviewer_summary": "ok"}
+    )
+    assert low.quality_score == 0
 
 
 def test_event_sanitises_secrets():

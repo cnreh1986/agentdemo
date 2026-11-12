@@ -70,6 +70,18 @@ CREATE TABLE IF NOT EXISTS workshop_metrics (
     runs_completed INTEGER DEFAULT 0,
     exports_downloaded INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS saved_tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    task TEXT NOT NULL,
+    background TEXT DEFAULT '',
+    constraints TEXT DEFAULT '',
+    time_horizon TEXT DEFAULT '',
+    output_format TEXT DEFAULT 'Briefing',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 

@@ -181,10 +181,12 @@ def _run_agent_node(
     ]
     result = runner(task, context_builder(state))
     if result.status == "failed":
+        detail = "; ".join(result.issues) if result.issues else result.summary
+        fail_message = result.summary if not result.issues else f"{result.summary} {detail}"
         return {
             "status": "FAILED",
             "current_stage": agent_key,
-            "error": result.summary,
+            "error": detail,
             "events": events
             + [
                 make_event(
@@ -192,8 +194,9 @@ def _run_agent_node(
                     stage=agent_key,
                     event_type="agent_failed",
                     status="failed",
-                    message=result.summary,
+                    message=fail_message[:500],
                     duration_ms=result.duration_ms,
+                    metadata={"issues": result.issues[:8]},
                 )
             ],
             "node_states": {agent_key: "Failed"},
@@ -205,7 +208,7 @@ def _run_agent_node(
                     "output": result.output,
                     "summary": result.summary,
                     "duration_ms": result.duration_ms,
-                    "error": "; ".join(result.issues) if result.issues else result.summary,
+                    "error": detail,
                 }
             },
             "updated_at": _now(),

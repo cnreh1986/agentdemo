@@ -52,9 +52,6 @@ class WorkforceRunner:
             state = dict(prior_state)
             state["human_revision_instruction"] = human_revision_instruction
             state["revision_instructions"] = human_revision_instruction
-            # Resume from execution via a fresh graph invocation with seeded state
-            # by running execution->review path: simplest approach re-invoke full graph
-            # with preserved packets and forced revision instruction.
             seed = initial_state(
                 task=state["task_input"]["task"],
                 background=state["task_input"].get("background", ""),
@@ -83,18 +80,15 @@ class WorkforceRunner:
                     "node_states": dict(state.get("node_states") or seed["node_states"]),
                 }
             )
-            # For human revision, bump and run execution+review only via helper graph path
             from src.orchestration.human_revision import run_human_revision
 
-            final = run_human_revision(
+            return run_human_revision(
                 self.provider,
                 seed,
                 search_provider=self.search_provider,
                 prompt_overrides=self.prompt_overrides,
+                on_update=on_update,
             )
-            if on_update:
-                on_update(final)
-            return final
 
         status = self.provider.status()
         seed = initial_state(
@@ -113,9 +107,10 @@ class WorkforceRunner:
         )
         if on_update:
             on_update(dict(seed))
-        final = self.graph.invoke(seed)
-        # Convert to plain dict for session_state
-        result = dict(final)
-        if on_update:
-            on_update(result)
-        return result
+
+        final: dict[str, Any] = dict(seed)
+        for snapshot in self.graph.stream(seed, stream_mode="values"):
+            final = dict(snapshot)
+            if on_update:
+                on_update(final)
+        return final

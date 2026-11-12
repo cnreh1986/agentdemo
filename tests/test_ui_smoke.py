@@ -29,3 +29,11 @@ def test_sample_task_selector_present():
     assert len(at.selectbox) >= 1
     labels = at.selectbox[0].options
     assert any("Plan my next productive week" in str(opt) for opt in labels)
+
+
+def test_studio_session_has_overlay_flags():
+    at = AppTest.from_file(str(STUDIO_PAGE), default_timeout=30)
+    at.run()
+    assert not at.exception
+    assert at.session_state["show_agent_overlay"] is False
+    assert at.session_state["agent_overlay_minimized"] is False

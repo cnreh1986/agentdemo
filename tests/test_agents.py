@@ -46,7 +46,33 @@ def test_agents_complete_with_demo_provider():
     assert review.status == "needs_revision"
 
 
-def test_invalid_agent_output_fails_validation():
+def test_sparse_research_output_is_coerced():
+    # Live models often return partial JSON; ResearchPacket should coerce rather than hard-fail.
     result = ResearchAgent(BadProvider()).run(_task(), {})
-    assert result.status == "failed"
-    assert result.issues
+    assert result.status == "completed"
+    assert result.output["run_id"] == "r1"
+    assert isinstance(result.output.get("key_findings"), list)
+
+
+def test_sparse_planning_output_is_coerced():
+    # Live models often return odd shapes (e.g. timeline as a string); coerce rather than hard-fail.
+    result = PlanningAgent(BadProvider()).run(_task(), {"research": {}})
+    assert result.status == "completed"
+    assert result.output["objective"]
+    assert isinstance(result.output.get("timeline"), list)
+    assert isinstance(result.output.get("actions"), list)
+
+
+def test_sparse_execution_and_review_output_is_coerced():
+    delivery = ExecutionAgent(BadProvider()).run(_task(), {"research": {}, "plan": {}})
+    assert delivery.status == "completed"
+    assert delivery.output["title"]
+    assert isinstance(delivery.output.get("key_findings"), list)
+
+    review = ReviewerAgent(BadProvider()).run(
+        _task(),
+        {"research": {}, "plan": {}, "deliverable": delivery.output},
+    )
+    assert review.status == "completed"
+    assert review.output["status"] == "unable_to_review"
+    assert 0 <= int(review.output["quality_score"]) <= 100

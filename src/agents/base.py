@@ -15,6 +15,17 @@ from src.models.task import TaskSpec
 from src.providers.llm_base import LLMProvider, ProviderError
 
 
+def _format_validation_errors(exc: ValidationError, limit: int = 5) -> list[str]:
+    issues: list[str] = []
+    for err in exc.errors()[:limit]:
+        loc = ".".join(str(part) for part in err.get("loc", ())) or "root"
+        msg = err.get("msg", "invalid")
+        issues.append(f"{loc}: {msg}")
+    if exc.error_count() > limit:
+        issues.append(f"...and {exc.error_count() - limit} more")
+    return issues
+
+
 class Agent(ABC):
     name: str
     schema_name: str
@@ -36,16 +47,51 @@ class Agent(ABC):
     def system_prompt(self) -> str:
         return get_prompt(self.name, self.prompt_overrides)
 
+    def prepare_raw_output(self, raw: dict[str, Any], task: TaskSpec, context: dict[str, Any]) -> dict[str, Any]:
+        """Hook for subclasses to normalize provider JSON before validation."""
+        return raw
+
     def run(self, task: TaskSpec, context: dict[str, Any] | None = None) -> AgentResult:
         context = context or {}
         started = time.perf_counter()
+        user_prompt = self.build_user_prompt(task, context)
         try:
             raw = self.provider.complete_json(
                 system_prompt=self.system_prompt(),
-                user_prompt=self.build_user_prompt(task, context),
+                user_prompt=user_prompt,
                 schema_name=self.schema_name,
             )
-            validated = self.output_model.model_validate(raw)
+            raw = self.prepare_raw_output(raw, task, context)
+            try:
+                validated = self.output_model.model_validate(raw)
+            except ValidationError as first_exc:
+                # One bounded retry with concrete validation feedback.
+                feedback = "; ".join(_format_validation_errors(first_exc))
+                retry_prompt = (
+                    f"{user_prompt}\n\n"
+                    "Your previous JSON failed validation. Fix these issues and return "
+                    f"ONLY valid JSON for schema `{self.schema_name}`:\n{feedback}"
+                )
+                raw = self.provider.complete_json(
+                    system_prompt=self.system_prompt(),
+                    user_prompt=retry_prompt,
+                    schema_name=self.schema_name,
+                )
+                raw = self.prepare_raw_output(raw, task, context)
+                try:
+                    validated = self.output_model.model_validate(raw)
+                except ValidationError as second_exc:
+                    duration = int((time.perf_counter() - started) * 1000)
+                    details = _format_validation_errors(second_exc)
+                    return AgentResult(
+                        agent_name=self.name,
+                        status="failed",
+                        summary="Agent output failed schema validation.",
+                        output={},
+                        issues=details or [f"Schema validation error: {second_exc.error_count()} issue(s)"],
+                        duration_ms=duration,
+                    )
+
             output = validated.model_dump(mode="json")
             duration = int((time.perf_counter() - started) * 1000)
             return AgentResult(
@@ -53,16 +99,6 @@ class Agent(ABC):
                 status="completed",
                 summary=self.summarise(output),
                 output=output,
-                duration_ms=duration,
-            )
-        except ValidationError as exc:
-            duration = int((time.perf_counter() - started) * 1000)
-            return AgentResult(
-                agent_name=self.name,
-                status="failed",
-                summary="Agent output failed schema validation.",
-                output={},
-                issues=[f"Schema validation error: {exc.error_count()} issue(s)"],
                 duration_ms=duration,
             )
         except ProviderError as exc:

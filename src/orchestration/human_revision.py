@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from src.orchestration.events import make_event
 from src.orchestration.nodes import NodeContext, await_human_node, make_execution_node, make_review_node
 from src.providers.llm_base import LLMProvider
 from src.providers.search_base import SearchProvider
+
+UpdateCallback = Callable[[dict[str, Any]], None]
 
 
 def _merge(state: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
@@ -24,12 +26,18 @@ def _merge(state: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _emit(on_update: UpdateCallback | None, state: dict[str, Any]) -> None:
+    if on_update:
+        on_update(dict(state))
+
+
 def run_human_revision(
     provider: LLMProvider,
     state: dict[str, Any],
     *,
     search_provider: SearchProvider | None = None,
     prompt_overrides: dict[str, str] | None = None,
+    on_update: UpdateCallback | None = None,
 ) -> dict[str, Any]:
     max_rev = int(state.get("max_revisions") or 1)
     count = int(state.get("revision_count") or 0)
@@ -52,7 +60,9 @@ def run_human_revision(
                 ]
             },
         )
-        return _merge(state, await_human_node(state))  # type: ignore[arg-type]
+        state = _merge(state, await_human_node(state))  # type: ignore[arg-type]
+        _emit(on_update, state)
+        return state
 
     ctx = NodeContext(provider, search_provider=search_provider, prompt_overrides=prompt_overrides)
     state = _merge(
@@ -70,10 +80,15 @@ def run_human_revision(
             ],
         },
     )
+    _emit(on_update, state)
     state = _merge(state, make_execution_node(ctx)(state))  # type: ignore[arg-type]
+    _emit(on_update, state)
     if state.get("status") == "FAILED":
         return state
     state = _merge(state, make_review_node(ctx)(state))  # type: ignore[arg-type]
+    _emit(on_update, state)
     if state.get("status") == "FAILED":
         return state
-    return _merge(state, await_human_node(state))  # type: ignore[arg-type]
+    state = _merge(state, await_human_node(state))  # type: ignore[arg-type]
+    _emit(on_update, state)
+    return state

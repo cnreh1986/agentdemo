@@ -26,5 +26,17 @@ class ExecutionAgent(Agent):
             }
         )
 
+    def prepare_raw_output(self, raw: dict[str, Any], task: TaskSpec, context: dict[str, Any]) -> dict[str, Any]:
+        data = dict(raw or {})
+        if not str(data.get("objective") or "").strip():
+            data["objective"] = task.objective or task.original_task
+        if not str(data.get("title") or "").strip():
+            data["title"] = f"{task.requested_output or 'Briefing'}: {task.objective or task.original_task}"
+        if not str(data.get("executive_summary") or "").strip():
+            data["executive_summary"] = (
+                f"Draft deliverable for: {task.objective or task.original_task}"
+            )
+        return data
+
     def summarise(self, output: dict[str, Any]) -> str:
         return f"Deliverable ready: {output.get('title', 'untitled')}"

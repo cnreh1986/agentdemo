@@ -64,6 +64,14 @@ class ResearchAgent(Agent):
             payload["search_error"] = search_error
         return self.dumps(payload)
 
+    def prepare_raw_output(self, raw: dict[str, Any], task: TaskSpec, context: dict[str, Any]) -> dict[str, Any]:
+        data = dict(raw or {})
+        if not str(data.get("run_id") or "").strip():
+            data["run_id"] = task.run_id
+        if not str(data.get("research_question") or "").strip():
+            data["research_question"] = f"What evidence and themes support: {task.objective}"
+        return data
+
     def run(self, task: TaskSpec, context: dict[str, Any] | None = None) -> Any:
         result = super().run(task, context)
         if result.status != "completed":

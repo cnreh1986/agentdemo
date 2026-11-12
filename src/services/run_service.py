@@ -73,6 +73,7 @@ class RunService:
         *,
         decision: str,
         note: str = "",
+        on_update: UpdateCallback | None = None,
     ) -> dict[str, Any]:
         state = dict(run_state)
         now = datetime.now(timezone.utc).isoformat()
@@ -148,6 +149,7 @@ class RunService:
                 mode=mode,
                 human_revision_instruction=note,
                 prior_state=state,
+                on_update=on_update,
             )
 
         raise ValueError(f"Unknown decision: {decision}")

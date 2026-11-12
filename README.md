@@ -23,6 +23,27 @@ streamlit run app.py
 
 Open the local URL Streamlit prints (typically http://localhost:8501).
 
+## Deploy on Streamlit Community Cloud
+
+This is a Streamlit app — deploy it on [Streamlit Community Cloud](https://share.streamlit.io), not Vercel (Vercel’s Python runtime expects FastAPI/Flask `app` exports and cannot host Streamlit’s server).
+
+1. Push the repo to GitHub (keep `.env` out of git — it is gitignored).
+2. At [share.streamlit.io](https://share.streamlit.io), create a **New app** from the repo.
+3. Set **Main file path** to `app.py` (Python 3.12 if offered).
+4. For Live Mode, open **Settings → Secrets** and add TOML secrets, for example:
+
+```toml
+OPENAI_API_KEY = "sk-..."
+WORKFORCE_LLM_MODEL = "openai/gpt-4o-mini"
+FIRECRAWL_API_KEY = ""
+WORKFORCE_PERSISTENCE_ENABLED = "true"
+WORKFORCE_MAX_REVISIONS = "1"
+```
+
+5. Deploy. Demo Mode works with no secrets.
+
+**Note:** SQLite under `data/` on Community Cloud is ephemeral (may reset on restart/redeploy). Fine for workshops; use external storage later if you need durable history.
+
 ## Modes
 
 | Mode | Credentials | Behaviour |
@@ -44,6 +65,7 @@ Optional search: set `FIRECRAWL_API_KEY` (from [firecrawl.dev](https://www.firec
 6. **Approve**, **Request Revision**, or **Reject** (human gate is mandatory).
 7. Download Markdown, JSON, ZIP, or Research as a Word (`.docx`) file.
 8. Click **New Task** anytime to clear the form and start a custom objective.
+9. Use **Task Manager** to create, update, or delete saved task templates, then load them in Workforce Studio.
 8. Reopen runs under **Run History** (local SQLite).
 
 ## Tests

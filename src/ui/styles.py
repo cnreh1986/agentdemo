@@ -40,6 +40,37 @@ APP_CSS = """
   background: #FFF7ED; border-left: 4px solid #F59E0B; padding: 0.75rem 1rem;
   border-radius: 6px; margin: 0.5rem 0 1rem 0;
 }
+.agent-activity-overlay {
+  border: 1px solid #CBD5E1;
+  border-radius: 14px;
+  padding: 1rem 1.15rem 1.25rem 1.15rem;
+  margin: 0.35rem 0 1.25rem 0;
+  background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 42%);
+  font-size: 1.05rem;
+}
+.agent-activity-overlay h3, .agent-activity-overlay h4 {
+  color: #0F172A;
+}
+.overlay-pipeline .pipe-node {
+  font-size: 0.95rem;
+  min-width: 7.5rem;
+  text-align: center;
+}
+.overlay-pipeline .pipe-node.active-node {
+  box-shadow: 0 0 0 2px rgba(13,148,136,0.35);
+  border: 1px solid #0D9488;
+  font-size: 1.02rem;
+}
+.overlay-expand-chip {
+  display: inline-block;
+  padding: 0.45rem 0.85rem;
+  border-radius: 10px;
+  background: #ECFDF5;
+  color: #065F46;
+  font-weight: 700;
+  border: 1px solid #6EE7B7;
+  margin: 0.35rem 0 0.85rem 0;
+}
 </style>
 """
 
