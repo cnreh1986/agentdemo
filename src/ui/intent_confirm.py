@@ -45,7 +45,9 @@ def render_intent_confirm(
         if task_class == "job_search":
             _render_job_panel(task, background, constraints, key, mode, settings, out)
         else:
-            _render_comparison_panel(task, background, constraints, time_horizon, key, mode, out)
+            _render_comparison_panel(
+                task, background, constraints, time_horizon, key, mode, settings, out
+            )
     return out
 
 
@@ -117,6 +119,7 @@ def _render_comparison_panel(
     time_horizon: str,
     key: str,
     mode: str,
+    settings: Settings,
     out: dict[str, Any],
 ) -> None:
     base = parse_competitive_analysis_intent(task, background, constraints, time_horizon)
@@ -150,6 +153,26 @@ def _render_comparison_panel(
         st.success("Context looks sufficient for a contextual comparison.")
     if mode == "live":
         st.info("Live Mode sends this context to your configured model provider. Avoid confidential details.")
+        if not settings.search_configured:
+            if intent.comparison_kind == "product":
+                st.warning(
+                    "Firecrawl is not configured. Product comparison cells will stay **unknown** "
+                    "(no invented features or pricing). Set FIRECRAWL_API_KEY for public-source fill, "
+                    "or use Demo Mode for an illustrative matrix."
+                )
+            else:
+                st.warning(
+                    "Firecrawl is not configured. Role domain-default cells will be labelled as model "
+                    "knowledge; user-supplied ownership still stands. Set FIRECRAWL_API_KEY to attach "
+                    "public pages, or use Demo Mode."
+                )
+        else:
+            st.caption(
+                "Live public sources use Firecrawl: short per-criterion queries; missing pages stay unknown."
+            )
     else:
-        st.info("Demo Mode: no model or network calls; domain-default cells are labelled as such.")
+        st.info(
+            "Demo Mode: no model or network calls; domain-default / illustrative public_source cells "
+            "are labelled as such."
+        )
     out["comparison_intent"] = intent.model_dump(mode="json")

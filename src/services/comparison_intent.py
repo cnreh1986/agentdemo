@@ -143,20 +143,33 @@ _NOTE_PATTERNS = {
 
 
 def split_comparison_subjects(task: str) -> list[str]:
-    """Pull the named subjects from 'Compare A and B ...' / 'A vs B' (section 19.1)."""
+    """Pull the named subjects from 'Compare A and B ...' / 'A vs B' (section 19.1).
+
+    Searches the whole task (not only the first sentence) so market-research phrasing like
+    \"Conduct market research… Compare HubSpot, Mailchimp, and Brevo on pricing…\" still works.
+    """
     text = (task or "").strip()
     if not text:
         return []
-    first = re.split(r"(?<=[.!?])\s+|\n", text, maxsplit=1)[0].strip().rstrip(".!?")
-    m = re.search(r"\b(?:compare|comparison\s+of|difference\s+between)\s+(?:a\s+|an\s+|the\s+)?(.+)", first, re.I)
+    m = re.search(
+        r"\b(?:compare|comparison\s+of|difference\s+between)\s+(?:a\s+|an\s+|the\s+)?(.+)",
+        text,
+        re.I,
+    )
     if m:
-        body = m.group(1)
-    elif re.search(r"\b(?:vs\.?|versus)\b", first, re.I):
-        body = first
+        # Keep only the remainder of the compare sentence (not following sentences).
+        body = re.split(r"[.!?\n]", m.group(1), maxsplit=1)[0]
     else:
-        return []
+        # Fall back to first sentence for bare "A vs B" without the word compare.
+        first = re.split(r"(?<=[.!?])\s+|\n", text, maxsplit=1)[0].strip().rstrip(".!?")
+        if re.search(r"\b(?:vs\.?|versus)\b", first, re.I):
+            body = first
+        else:
+            return []
+    # Drop trailing decision/criteria clauses: "… on pricing", "… for our stack".
     body = re.split(
-        r"\s+(?:for|in|at|as|given|when|because|so|considering|based\s+on|where|that|which|if|with\s+my|with\s+our)\s+",
+        r"\s+(?:on|for|in|at|as|given|when|because|so|considering|based\s+on|"
+        r"where|that|which|if|with\s+my|with\s+our)\s+",
         body,
         maxsplit=1,
         flags=re.I,
@@ -164,7 +177,7 @@ def split_comparison_subjects(task: str) -> list[str]:
     parts = re.split(r"\s*,\s*|\s+and\s+|\s+vs\.?\s+|\s+versus\s+|\s+to\s+|\s+against\s+", body, flags=re.I)
     out: list[str] = []
     for part in parts:
-        label = re.sub(r"^(?:a|an|the|my|our)\s+", "", part.strip(), flags=re.I).strip(" ,.;:")
+        label = re.sub(r"^(?:a|an|the|my|our|and|or)\s+", "", part.strip(), flags=re.I).strip(" ,.;:?")
         if label and len(label.split()) <= 6 and label.lower() not in {x.lower() for x in out}:
             out.append(label)
     return out[:5]
@@ -270,7 +283,7 @@ def _parse_decision(
 ) -> ComparisonDecision:
     combined = " ".join(p for p in (task, background, constraints) if p)
     question = ""
-    m = re.search(r"\bdecision\s+(?:is|:)\s*(.+?)(?:[.;\n]|$)", combined, re.I)
+    m = re.search(r"\bdecision\s*(?:is|:)\s*(.+?)(?:[.;\n]|$)", combined, re.I)
     if m:
         question = m.group(1).strip().rstrip("?").strip()
         question = question[:1].upper() + question[1:] + ("?" if not question.endswith("?") else "")
@@ -592,9 +605,16 @@ def build_comparison_matrix(
     intent: CompetitiveAnalysisIntent,
     *,
     public_evidence: dict[str, list[ComparisonEvidenceItem]] | None = None,
+    product_fills: dict[str, ComparisonEvidenceItem] | None = None,
 ) -> tuple[list[ComparisonCell], list[str]]:
-    """Return (matrix, criteria_not_used). Unknown cells stay empty (section 21)."""
+    """Return (matrix, criteria_not_used). Unknown cells stay empty (section 21).
+
+    ``product_fills`` maps ``subject_id:criterion_id`` → public_source evidence for
+    product comparisons (Phase C). Role comparisons still use ``public_evidence`` by
+    criterion id.
+    """
     public_evidence = public_evidence or {}
+    product_fills = product_fills or {}
     cells: list[ComparisonCell] = []
     if _is_catalog_pair(intent):
         for subject in intent.subjects:
@@ -630,12 +650,26 @@ def build_comparison_matrix(
     for crit in _user_listed(intent):
         crit_id = re.sub(r"[^a-z0-9]+", "_", crit.lower()).strip("_") or "criterion"
         for subject in intent.subjects:
-            cells.append(
-                ComparisonCell(
-                    criterion_id=crit_id, criterion_label=crit, subject_id=subject.subject_id,
-                    subject_label=subject.label, value="", basis="unknown", evidence=[],
+            fill = product_fills.get(f"{subject.subject_id}:{crit_id}")
+            if fill and fill.source_url and fill.claim.strip():
+                cells.append(
+                    ComparisonCell(
+                        criterion_id=crit_id,
+                        criterion_label=crit,
+                        subject_id=subject.subject_id,
+                        subject_label=subject.label,
+                        value=fill.claim.strip(),
+                        basis="public_source",
+                        evidence=[fill],
+                    )
                 )
-            )
+            else:
+                cells.append(
+                    ComparisonCell(
+                        criterion_id=crit_id, criterion_label=crit, subject_id=subject.subject_id,
+                        subject_label=subject.label, value="", basis="unknown", evidence=[],
+                    )
+                )
     return cells, []
 
 
@@ -721,7 +755,11 @@ def build_comparison_envelope(
     *,
     illustrative: bool = False,
     public_evidence: dict[str, list[ComparisonEvidenceItem]] | None = None,
+    product_fills: dict[str, ComparisonEvidenceItem] | None = None,
     search_note: str | None = None,
+    allowed_urls: list[str] | set[str] | None = None,
+    suggested_subjects: list[str] | None = None,
+    suggested_criteria: list[str] | None = None,
 ) -> ComparisonEnvelope:
     """Assemble the section 21 envelope in code from the typed intent."""
     intent = (
@@ -753,15 +791,31 @@ def build_comparison_envelope(
                     "Thin context: the contextual matrix is intentionally empty. "
                     "No company, headcount, or recommendation was invented."
                 ],
+                "suggested_subjects": list(suggested_subjects or []),
+                "suggested_criteria": list(suggested_criteria or []),
             },
         )
 
-    matrix, not_used = build_comparison_matrix(intent, public_evidence=public_evidence)
+    matrix, not_used = build_comparison_matrix(
+        intent, public_evidence=public_evidence, product_fills=product_fills
+    )
     options, deps, blocked = _option_set(intent, matrix)
     unknowns = sorted({f"{c.subject_label}: {c.criterion_label}" for c in matrix if c.basis == "unknown"})
-    limitations = ["Domain-default cells describe the usual pattern, not your company."]
+    if _is_catalog_pair(intent):
+        limitations = ["Domain-default cells describe the usual pattern, not your company."]
+    else:
+        limitations = [
+            "Product cells are filled only from retrieved public pages or user-supplied facts; "
+            "missing pages stay unknown."
+        ]
     if search_note:
         limitations.append(search_note)
+    url_list = sorted({*(allowed_urls or []), *(
+        e.source_url
+        for c in matrix
+        for e in c.evidence
+        if e.source_url
+    )})
     extra: dict[str, Any] = {
         "context_echo": echo,
         "unknowns": unknowns,
@@ -770,6 +824,9 @@ def build_comparison_envelope(
         "limitations": limitations,
         "shared_work": SHARED_WORK if _is_catalog_pair(intent) else [],
         "scores": "none (describe first; no numeric scores)",
+        "allowed_urls": url_list,
+        "suggested_subjects": list(suggested_subjects or []),
+        "suggested_criteria": list(suggested_criteria or []),
     }
     if _is_catalog_pair(intent):
         extra["domain_notes"] = [

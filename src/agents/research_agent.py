@@ -10,7 +10,6 @@ from src.models.agent import AgentResult
 from src.models.competitive_analysis import (
     CompetitiveAnalysisIntent,
     ComparisonEnvelope,
-    ComparisonEvidenceItem,
 )
 from src.models.job_search import JobSearchEnvelope, JobSearchIntent
 from src.models.research import EvidenceItem, EvidenceType, ResearchPacket
@@ -170,10 +169,12 @@ class ResearchAgent(Agent):
     def _run_comparison(self, task: TaskSpec, context: dict[str, Any]) -> AgentResult:
         from src.demo.fixtures import build_demo_comparison_envelope
         from src.services.comparison_intent import (
-            HIRING_CRITERIA,
-            CATALOG_BY_ID,
             build_comparison_envelope,
             parse_competitive_analysis_intent,
+        )
+        from src.services.comparison_research import (
+            collect_public_evidence,
+            ground_comparison_envelope,
         )
         from src.services.task_class_packets import comparison_research_packet
 
@@ -187,52 +188,25 @@ class ResearchAgent(Agent):
                 task.original_task, task.background, task.constraints, task.time_horizon
             )
         )
-        public_evidence: dict[str, list[ComparisonEvidenceItem]] = {}
         public_items: list[dict[str, Any]] = []
         note: str | None = None
         if mode == "demo":
             envelope = ComparisonEnvelope.model_validate(build_demo_comparison_envelope(intent))
         else:
-            if intent.status == "ready" and {s.subject_id for s in intent.subjects} == {"pm", "pmm"}:
-                if self.search_provider and self.search_provider.is_configured():
-                    labels = " versus ".join(s.label.lower() for s in intent.subjects)
-                    for crit in [c for c in HIRING_CRITERIA if c != "pricing"][:4]:
-                        row = CATALOG_BY_ID[crit]
-                        query = f"{labels} {row['label'].lower()} responsibilities"
-                        try:
-                            results = self.search_provider.search(query, max_results=2)
-                        except Exception as exc:  # noqa: BLE001
-                            note = f"Public search failed for part of the matrix ({str(exc)[:80]}); defaults are unverified."
-                            continue
-                        for r in results[:2]:
-                            claim = (r.snippet or r.title or "")[:240]
-                            if not r.url or not claim:
-                                continue
-                            public_evidence.setdefault(crit, []).append(
-                                ComparisonEvidenceItem(
-                                    claim=claim, source_url=r.url, source_title=r.title, basis="public_source"
-                                )
-                            )
-                            public_items.append(
-                                {
-                                    "claim": claim,
-                                    "source_title": r.title,
-                                    "source_url": r.url,
-                                    "source_domain": r.domain,
-                                    "retrieved_at": r.retrieved_at,
-                                    "supporting_excerpt_or_summary": claim,
-                                    "evidence_type": "secondary",
-                                    "confidence": "medium",
-                                }
-                            )
-                else:
-                    note = (
-                        "Public pages were not retrieved (no search tool configured); domain-default cells "
-                        "are model knowledge, and user-supplied cells still stand."
-                    )
+            bundle = collect_public_evidence(self.search_provider, intent)
+            note = bundle.note
+            public_items = list(bundle.public_items)
             envelope = build_comparison_envelope(
-                intent, illustrative=False, public_evidence=public_evidence, search_note=note
+                intent,
+                illustrative=False,
+                public_evidence=bundle.role_evidence,
+                product_fills=bundle.product_fills,
+                search_note=note,
+                allowed_urls=bundle.allowed_urls,
+                suggested_subjects=bundle.suggested_subjects,
+                suggested_criteria=bundle.suggested_criteria,
             )
+            envelope, _ = ground_comparison_envelope(envelope, allowed_urls=bundle.allowed_urls)
         packet = ResearchPacket.model_validate(
             comparison_research_packet(
                 task.run_id, task.original_task, envelope, mode=mode, public_items=public_items, search_note=note

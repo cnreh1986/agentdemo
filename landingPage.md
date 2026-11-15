@@ -159,6 +159,44 @@ Yes, on **Agent Lab** — edits apply to the current Streamlit session only and 
 
 Streamlit still processes the run in the page script. Use the Agent Activity overlay to follow progress. **Pause** stops after the current stage; **Start** resumes. Schedule-for-later is covered as a design note in [`enhancement.md`](enhancement.md), not as a guaranteed UI control.
 
+### Which dropdowns appear on Workforce Studio?
+
+Three main controls:
+
+- **Execution mode** — **Demo Mode** (fixtures, no keys) or **Live LLM Mode** (needs provider credentials; job search also needs `SERPAPI_API_KEY`).
+- **Sample or saved task** — loads a built-in sample or a Task Manager template into the form (task text, background, constraints, and a suggested output format).
+- **Output format** — shapes the deliverable. See **What do the Output format options mean?** below. Match the format to your intent (e.g. **Job search results** for a jobs ask; **Comparison matrix** for competitive market research).
+
+Task class (`briefing` / `job_search` / `competitive_analysis`) is inferred mainly from your task text; the output format should still align with what you want to download.
+
+### What do the Output format options mean?
+
+Pick **Output format** on Workforce Studio before you run. Each option below includes a copy-paste **example task**.
+
+**Briefing** — Narrative overview with executive summary, findings, and recommendations (default workshop brief).
+
+- Example: `Research a product opportunity and prepare a brief.`
+
+**Action Plan** — Time-ordered actions, priorities, effort, and owners — what to do next.
+
+- Example: `Plan my next productive week.`
+
+**Research Summary** — Emphasises findings, evidence, limitations, and open questions (prose research, not a full competitor matrix).
+
+- Example: `Summarise public sources on AI meeting note tools for B2B PMs; list evidence gaps.`
+
+**Markdown bundle** — Full markdown package for download and workshop notes (e.g. a multi-section roadmap).
+
+- Example: `Create a learning roadmap for a new skill.`
+
+**Job search results** — Typed job table (included / needs review / excluded). Live Mode needs `SERPAPI_API_KEY`; Demo Mode uses illustrative fixtures.
+
+- Example: `Find product manager jobs in Hyderabad, 5–10 years of experience, posted in the last 7 days.`
+
+**Comparison matrix** — **Competitive market research** for a product or stack decision: you describe the product need and name tools or products to compare; the workforce researches the market and fills a criteria matrix (pricing, features, AI capabilities, fit) with an evidence basis. Thin context shows `needs_context` prompts instead of inventing a market. (Role-vs-role compares, such as PM vs product marketer, can also use this format when subjects are roles.)
+
+- Example: `Conduct market research on marketing tools for a lightweight B2B team. Compare HubSpot, Mailchimp, and Brevo on pricing, core features, AI capabilities, and fit for email + CRM. We are a small SaaS company choosing one stack this quarter; do not invent pricing that sources do not show.`
+
 ---
 
 ## Planned UX (design notes)

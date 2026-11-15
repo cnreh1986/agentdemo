@@ -118,6 +118,11 @@ def check_comparison(
     intent = CompetitiveAnalysisIntent.model_validate(intent_dict or envelope_dict.get("intent_echo") or {})
     issues: list[str] = []
     text = _deliverable_text(deliverable)
+    allowed_urls = set((envelope.extra or {}).get("allowed_urls") or [])
+    role_catalog_ids = {
+        "problem_ownership", "roadmap", "positioning", "launch", "pricing",
+        "enablement", "discovery", "metrics", "artifacts", "horizon", "current_ownership",
+    }
 
     if envelope.status == "needs_context":
         if envelope.matrix:
@@ -145,6 +150,23 @@ def check_comparison(
             have = {c.subject_id for c in envelope.matrix if c.criterion_id == crit}
             if intent_subjects - have:
                 issues.append(f"Coverage: criterion '{crit}' lacks a cell for every subject.")
+        if intent.comparison_kind == "product":
+            # Role-catalog rows that the user did not name as product criteria.
+            user_crit = set()
+            policy = intent.criteria_policy or ""
+            if policy.startswith("user_listed:"):
+                for part in policy[len("user_listed:") :].split(";"):
+                    cid = re.sub(r"[^a-z0-9]+", "_", part.strip().lower()).strip("_")
+                    if cid:
+                        user_crit.add(cid)
+            catalog_on_product = sorted(
+                c for c in criteria if c in role_catalog_ids and c not in user_crit
+            )
+            if catalog_on_product:
+                issues.append(
+                    "Subjects: role-catalog rows must not appear on a product matrix: "
+                    + ", ".join(catalog_on_product)
+                )
         for cell in envelope.matrix:
             tag = f"{cell.subject_id}:{cell.criterion_id}"
             if cell.basis == "unknown" and cell.value.strip():
@@ -153,10 +175,23 @@ def check_comparison(
                 issues.append(f"Basis: cell {tag} is empty but basis is '{cell.basis}'.")
             if cell.basis == "public_source" and not any(e.source_url for e in cell.evidence):
                 issues.append(f"Basis: public_source cell {tag} has no source URL.")
+            if cell.basis == "public_source":
+                for ev in cell.evidence:
+                    if ev.basis != "public_source":
+                        continue
+                    if not ev.source_url:
+                        issues.append(f"Basis: public_source cell {tag} has no source URL.")
+                    elif allowed_urls and ev.source_url not in allowed_urls:
+                        issues.append(
+                            f"Basis: public_source cell {tag} cites a URL not returned by the search tool."
+                        )
             if cell.basis == "user_supplied" and not any(e.basis == "user_supplied" and e.claim.strip() for e in cell.evidence):
                 issues.append(f"Blanks: user_supplied cell {tag} quotes no user statement.")
             if cell.basis == "unknown" and cell.criterion_id == "pricing" and cell.value:
                 issues.append(f"Blanks: pricing fact in {tag} was never stated by the user.")
+        unknowns = (envelope.extra or {}).get("unknowns")
+        if unknowns is None:
+            issues.append("Blanks: envelope must list unknown cells under extra.unknowns.")
         # Precedence: user ownership notes must survive as user_supplied cells.
         for note in intent.user_context.current_ownership:
             obj = note.split(":")[0].strip().lower()

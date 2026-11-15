@@ -29,6 +29,9 @@ SAMPLE_TASKS: dict[str, dict[str, str]] = {
 }
 
 SAMPLE_JOBS_LABEL = "Find product manager jobs in Hyderabad (5–10 years, last 7 days)"
+SAMPLE_MARKET_RESEARCH_LABEL = (
+    "Market research on marketing tools (HubSpot vs Mailchimp vs Brevo)"
+)
 SAMPLE_COMPARE_RICH_LABEL = "Compare product manager and product marketer (example company context)"
 SAMPLE_COMPARE_THIN_LABEL = "Compare product manager and product marketer (needs context)"
 
@@ -41,6 +44,26 @@ SAMPLE_TASKS[SAMPLE_JOBS_LABEL] = {
     "constraints": "Hyderabad, India only; do not apply or contact anyone.",
     "time_horizon": "This week",
     "output_format": "Job search results",
+}
+
+SAMPLE_TASKS[SAMPLE_MARKET_RESEARCH_LABEL] = {
+    "task": (
+        "Conduct market research on marketing tools for a lightweight B2B team. "
+        "Compare HubSpot, Mailchimp, and Brevo on pricing, core features, AI capabilities, "
+        "and fit for email + CRM."
+    ),
+    "background": (
+        "We are a small SaaS company choosing one marketing stack this quarter. "
+        "We need email campaigns and a simple CRM; budget is limited. "
+        "Decision: which tool to standardise on for the next 12 months. "
+        "(Workshop example — treat public pricing as approximate.)"
+    ),
+    "constraints": (
+        "Criteria to compare: pricing, core features, AI capabilities, fit for email + CRM. "
+        "Do not invent pricing or features that sources do not show. Do not purchase or sign up."
+    ),
+    "time_horizon": "This quarter",
+    "output_format": "Comparison matrix",
 }
 
 SAMPLE_TASKS[SAMPLE_COMPARE_RICH_LABEL] = {
@@ -76,6 +99,7 @@ _SYSTEM_TASK_IDS: dict[str, str] = {
     "Research a product opportunity and prepare a brief.": "system-product-brief",
     "Create a learning roadmap for a new skill.": "system-learning-roadmap",
     SAMPLE_JOBS_LABEL: "system-job-search-hyderabad-pm",
+    SAMPLE_MARKET_RESEARCH_LABEL: "system-market-research-marketing-tools",
     SAMPLE_COMPARE_RICH_LABEL: "system-compare-pm-pmm-context",
     SAMPLE_COMPARE_THIN_LABEL: "system-compare-pm-pmm-thin",
 }

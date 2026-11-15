@@ -8,6 +8,7 @@ from src.models.agent import AgentResult
 from src.models.competitive_analysis import ComparisonEnvelope
 from src.models.job_search import JobSearchEnvelope
 from src.models.task import TaskSpec
+from src.services.comparison_research import ground_comparison_envelope, scrub_comparison_markdown
 from src.services.job_intent import ground_job_envelope, scrub_ungrounded_refs, text_has_ungrounded_refs
 from src.services.task_class_render import (
     compact_comparison_envelope,
@@ -92,13 +93,17 @@ class ExecutionAgent(Agent):
                 issues=["No comparison envelope was handed off from research."],
                 duration_ms=result.duration_ms,
             )
-        envelope = ComparisonEnvelope.model_validate(raw)
+        envelope, _ = ground_comparison_envelope(ComparisonEnvelope.model_validate(raw))
+        urls = set((envelope.extra or {}).get("allowed_urls") or [])
         out = dict(result.output)
-        out["markdown_content"] = render_comparison_markdown(
+        summary = scrub_comparison_markdown(str(out.get("executive_summary") or ""), allowed_urls=urls)
+        markdown = render_comparison_markdown(
             envelope,
             title=out.get("title") or "Comparison",
-            executive_summary=str(out.get("executive_summary") or ""),
+            executive_summary=summary,
         )
+        out["executive_summary"] = summary
+        out["markdown_content"] = scrub_comparison_markdown(markdown, allowed_urls=urls)
         result.output = out
         result.artifacts = {**result.artifacts, "comparison_envelope": envelope.model_dump(mode="json")}
         return result

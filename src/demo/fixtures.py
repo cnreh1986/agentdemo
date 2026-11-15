@@ -453,9 +453,18 @@ def build_demo_job_envelope(
 
 
 def build_demo_comparison_envelope(intent: Any | None = None) -> dict[str, Any]:
-    """Illustrative comparison envelope; defaults to the PM vs Product Marketer sample context."""
-    from src.models.competitive_analysis import CompetitiveAnalysisIntent
+    """Illustrative comparison envelope; defaults to the PM vs Product Marketer sample context.
+
+    Product comparisons (e.g. HubSpot / Mailchimp / Brevo) get illustrative
+    ``public_source`` cells with ``example.invalid`` URLs — no network call.
+    """
+    from src.models.competitive_analysis import (
+        CompetitiveAnalysisIntent,
+        ComparisonEvidenceItem,
+    )
     from src.services.comparison_intent import (
+        _is_catalog_pair,
+        _user_listed,
         build_comparison_envelope,
         parse_competitive_analysis_intent,
     )
@@ -469,5 +478,36 @@ def build_demo_comparison_envelope(intent: Any | None = None) -> dict[str, Any]:
         )
     elif isinstance(intent, dict):
         intent = CompetitiveAnalysisIntent.model_validate(intent)
-    envelope = build_comparison_envelope(intent, illustrative=True)
+
+    product_fills: dict[str, ComparisonEvidenceItem] = {}
+    allowed: list[str] = []
+    if intent.status == "ready" and not _is_catalog_pair(intent) and intent.comparison_kind == "product":
+        import re
+
+        for crit in _user_listed(intent):
+            crit_id = re.sub(r"[^a-z0-9]+", "_", crit.lower()).strip("_") or "criterion"
+            for subject in intent.subjects:
+                url = f"https://example.invalid/demo/{subject.subject_id}/{crit_id}"
+                allowed.append(url)
+                product_fills[f"{subject.subject_id}:{crit_id}"] = ComparisonEvidenceItem(
+                    claim=(
+                        f"Illustrative note for {subject.label} on {crit} "
+                        "(Demo Mode — not a live page)."
+                    ),
+                    source_url=url,
+                    source_title=f"Demo fixture: {subject.label}",
+                    basis="public_source",
+                )
+
+    envelope = build_comparison_envelope(
+        intent,
+        illustrative=True,
+        product_fills=product_fills or None,
+        allowed_urls=allowed or None,
+        search_note=(
+            "Demo Mode fixtures: no network call was made; public_source cells are illustrative."
+            if product_fills
+            else None
+        ),
+    )
     return envelope.model_dump(mode="json")

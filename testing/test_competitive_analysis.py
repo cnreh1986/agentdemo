@@ -8,15 +8,22 @@ import json
 
 import pytest
 
+from src.agents.execution_agent import ExecutionAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.research_agent import ResearchAgent
 from src.config.samples import (
     SAMPLE_COMPARE_RICH_LABEL,
     SAMPLE_COMPARE_THIN_LABEL,
+    SAMPLE_MARKET_RESEARCH_LABEL,
     SAMPLE_TASKS,
 )
 from src.demo.fixtures import build_demo_comparison_envelope
-from src.models.competitive_analysis import ComparisonEnvelope
+from src.models.agent import AgentResult
+from src.models.competitive_analysis import (
+    ComparisonCell,
+    ComparisonEnvelope,
+    ComparisonEvidenceItem,
+)
 from src.models.task import TaskSpec
 from src.orchestration.runner import WorkforceRunner
 from src.providers.demo_provider import DemoProvider
@@ -36,6 +43,10 @@ from src.services.comparison_intent import (
     rebuild_comparison_intent,
     split_comparison_subjects,
 )
+from src.services.comparison_research import (
+    collect_public_evidence,
+    ground_comparison_envelope,
+)
 from src.services.export_service import ExportService
 from src.services.job_intent import classify_task_class
 from src.services.task_class_render import comparison_csv, render_comparison_markdown
@@ -43,6 +54,7 @@ from src.services.task_class_review import check_comparison
 
 RICH = SAMPLE_TASKS[SAMPLE_COMPARE_RICH_LABEL]
 THIN = SAMPLE_TASKS[SAMPLE_COMPARE_THIN_LABEL]
+MARKET = SAMPLE_TASKS[SAMPLE_MARKET_RESEARCH_LABEL]
 
 
 def rich_intent():
@@ -406,7 +418,8 @@ def test_live_research_attaches_only_tool_urls_per_criterion():
     search = FakeSearch()
     agent = ResearchAgent(ExplodingProvider(), search_provider=search)
     result = agent.run(spec("live"), {"mode": "live", "comparison_intent": rich_intent().model_dump(mode="json")})
-    assert 1 <= len(search.queries) <= 4  # short per-criterion queries, not the company paragraph
+    # Every non-pricing hiring criterion gets a short query (not the company paragraph).
+    assert len(search.queries) == len([c for c in HIRING_CRITERIA if c != "pricing"])
     assert all("80-person" not in q for q in search.queries)
     env = ComparisonEnvelope.model_validate(result.artifacts["comparison_envelope"])
     urls = {e.source_url for c in env.matrix for e in c.evidence if e.source_url}
@@ -474,3 +487,249 @@ def test_comparison_csv_and_bundle_export():
     bundle = json.loads(exporter.json_bundle(state)[1])
     assert bundle["comparison_envelope"]["status"] == "ready"
     assert bundle["comparison_intent"]["subjects"][0]["subject_id"] == "pm"
+
+
+# ----------------------------------------------------------------- Phase B/C parity
+
+
+def market_intent():
+    return parse_competitive_analysis_intent(
+        MARKET["task"], MARKET["background"], MARKET["constraints"], MARKET["time_horizon"]
+    )
+
+
+def test_market_sample_classifies_and_parses_products():
+    assert classify_task_class(MARKET["task"], MARKET["background"], MARKET["constraints"]) == "competitive_analysis"
+    intent = market_intent()
+    assert intent.comparison_kind == "product"
+    assert intent.status == "ready"
+    assert [s.label for s in intent.subjects] == ["HubSpot", "Mailchimp", "Brevo"]
+
+
+def test_ground_comparison_drops_invented_public_urls():
+    intent = rich_intent()
+    env = build_comparison_envelope(intent, illustrative=False)
+    # Attach an invented public_source cell
+    bad = ComparisonCell(
+        criterion_id="positioning",
+        criterion_label="Positioning",
+        subject_id="pm",
+        subject_label="Product Manager",
+        value="Invented claim",
+        basis="public_source",
+        evidence=[
+            ComparisonEvidenceItem(
+                claim="Invented claim",
+                source_url="https://evil.example/fake",
+                basis="public_source",
+            )
+        ],
+    )
+    env = env.model_copy(update={"matrix": list(env.matrix) + [bad], "extra": {**env.extra, "allowed_urls": []}})
+    grounded, dropped = ground_comparison_envelope(env, allowed_urls=set())
+    assert any("pm:positioning" in d for d in dropped)
+    assert all(
+        not (c.basis == "public_source" and c.subject_id == "pm" and c.criterion_id == "positioning")
+        for c in grounded.matrix
+    )
+
+
+def test_product_live_fills_named_criteria_from_search():
+    search = FakeSearch()
+    intent = market_intent()
+    agent = ResearchAgent(ExplodingProvider(), search_provider=search)
+    result = agent.run(
+        TaskSpec(
+            run_id="r",
+            original_task=MARKET["task"],
+            objective=MARKET["task"],
+            created_at="now",
+            execution_mode="live",
+            task_class="competitive_analysis",
+            background=MARKET["background"],
+            constraints=MARKET["constraints"],
+        ),
+        {"mode": "live", "comparison_intent": intent.model_dump(mode="json")},
+    )
+    assert result.status == "completed"
+    assert search.queries  # one query per subject × criterion
+    assert all("HubSpot" in q or "Mailchimp" in q or "Brevo" in q for q in search.queries)
+    env = ComparisonEnvelope.model_validate(result.artifacts["comparison_envelope"])
+    assert env.comparison_kind == "product"
+    filled = [c for c in env.matrix if c.basis == "public_source"]
+    assert filled
+    assert all(c.evidence and c.evidence[0].source_url.startswith("https://example.test/") for c in filled)
+    assert checks(env) == []
+
+
+def test_product_live_without_search_leaves_unknowns():
+    intent = market_intent()
+    agent = ResearchAgent(ExplodingProvider())
+    result = agent.run(
+        TaskSpec(
+            run_id="r",
+            original_task=MARKET["task"],
+            objective=MARKET["task"],
+            created_at="now",
+            execution_mode="live",
+            task_class="competitive_analysis",
+        ),
+        {"mode": "live", "comparison_intent": intent.model_dump(mode="json")},
+    )
+    env = ComparisonEnvelope.model_validate(result.artifacts["comparison_envelope"])
+    assert env.matrix
+    assert all(c.basis == "unknown" for c in env.matrix)
+    assert any("not retrieved" in x for x in env.extra["limitations"])
+
+
+class SelectiveSearch:
+    """Returns results only when the query mentions HubSpot; others stay unknown."""
+
+    def __init__(self):
+        self.queries = []
+
+    def is_configured(self):
+        return True
+
+    def search(self, query, max_results=5):
+        self.queries.append(query)
+        if "HubSpot" not in query:
+            return []
+        return [
+            SearchResult(
+                "HubSpot pricing",
+                "https://example.test/hubspot",
+                "example.test",
+                "HubSpot lists starter email plans on its pricing page.",
+                "now",
+            )
+        ]
+
+
+def test_product_live_missing_pages_stay_unknown():
+    search = SelectiveSearch()
+    intent = market_intent()
+    bundle = collect_public_evidence(search, intent)
+    env = build_comparison_envelope(
+        intent,
+        public_evidence=bundle.role_evidence,
+        product_fills=bundle.product_fills,
+        allowed_urls=bundle.allowed_urls,
+        search_note=bundle.note,
+    )
+    hub = [c for c in env.matrix if c.subject_label == "HubSpot" and c.basis == "public_source"]
+    other = [c for c in env.matrix if c.subject_label != "HubSpot"]
+    assert hub
+    assert all(c.basis == "unknown" and not c.value for c in other)
+
+
+def test_product_demo_fixture_fills_illustrative_matrix():
+    intent = market_intent()
+    raw = build_demo_comparison_envelope(intent)
+    env = ComparisonEnvelope.model_validate(raw)
+    assert env.illustrative
+    assert env.comparison_kind == "product"
+    assert any(c.basis == "public_source" for c in env.matrix)
+    assert all(
+        (e.source_url or "").startswith("https://example.invalid/")
+        for c in env.matrix
+        for e in c.evidence
+        if e.source_url
+    )
+    assert any("Demo Mode" in x for x in env.extra.get("limitations") or [])
+
+
+def test_execution_grounds_comparison_and_scrubs_invented_urls():
+    intent = market_intent()
+    env = ComparisonEnvelope.model_validate(build_demo_comparison_envelope(intent))
+    # Inject a forged public_source cell with a URL not in allow-list
+    forged = ComparisonCell(
+        criterion_id="pricing",
+        criterion_label="pricing",
+        subject_id="hubspot",
+        subject_label="HubSpot",
+        value="Fake price",
+        basis="public_source",
+        evidence=[
+            ComparisonEvidenceItem(
+                claim="Fake price", source_url="https://forged.invalid/x", basis="public_source"
+            )
+        ],
+    )
+    env = env.model_copy(update={"matrix": [forged] + list(env.matrix)})
+    agent = ExecutionAgent(DemoProvider())
+    result = AgentResult(
+        agent_name="execution",
+        status="completed",
+        summary="ok",
+        output={
+            "title": "Comparison",
+            "executive_summary": "See https://forged.invalid/x for pricing.",
+            "markdown_content": "draft",
+        },
+    )
+    finished = agent._finish_comparison(
+        result, {"comparison_envelope": env.model_dump(mode="json")}
+    )
+    out_env = ComparisonEnvelope.model_validate(finished.artifacts["comparison_envelope"])
+    assert not any(e.source_url == "https://forged.invalid/x" for c in out_env.matrix for e in c.evidence)
+    assert "forged.invalid" not in finished.output["markdown_content"]
+    assert "forged.invalid" not in finished.output["executive_summary"]
+
+
+def test_reviewer_fails_ungrounded_public_source_url():
+    intent = rich_intent()
+    env = build_comparison_envelope(intent)
+    bad = ComparisonCell(
+        criterion_id="launch",
+        criterion_label="Launch",
+        subject_id="pm",
+        subject_label="Product Manager",
+        value="From a fake page",
+        basis="public_source",
+        evidence=[
+            ComparisonEvidenceItem(
+                claim="From a fake page",
+                source_url="https://not-from-tool.example/x",
+                basis="public_source",
+            )
+        ],
+    )
+    env = env.model_copy(
+        update={
+            "matrix": list(env.matrix) + [bad],
+            "extra": {**env.extra, "allowed_urls": ["https://example.test/1"]},
+        }
+    )
+    issues = check_comparison(env.model_dump(mode="json"), intent.model_dump(mode="json"))
+    assert any("not returned by the search tool" in i for i in issues)
+
+
+def test_check_comparison_rejects_role_catalog_on_product_matrix():
+    intent = market_intent()
+    env = build_comparison_envelope(intent)
+    bad = ComparisonCell(
+        criterion_id="roadmap",
+        criterion_label="Roadmap",
+        subject_id=intent.subjects[0].subject_id,
+        subject_label=intent.subjects[0].label,
+        value="",
+        basis="unknown",
+        evidence=[],
+    )
+    # Ensure every subject has the bad criterion so coverage check does not dominate
+    cells = list(env.matrix) + [
+        ComparisonCell(
+            criterion_id="roadmap",
+            criterion_label="Roadmap",
+            subject_id=s.subject_id,
+            subject_label=s.label,
+            value="",
+            basis="unknown",
+            evidence=[],
+        )
+        for s in intent.subjects
+    ]
+    env = env.model_copy(update={"matrix": cells})
+    issues = check_comparison(env.model_dump(mode="json"), intent.model_dump(mode="json"))
+    assert any("role-catalog rows" in i for i in issues)
