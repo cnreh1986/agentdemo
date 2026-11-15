@@ -30,16 +30,18 @@ This is a Streamlit app — deploy it on [Streamlit Community Cloud](https://sha
 1. Push the repo to GitHub (keep `.env` out of git — it is gitignored).
 2. At [share.streamlit.io](https://share.streamlit.io), create a **New app** from the repo.
 3. Set **Main file path** to `app.py` (Python 3.12 if offered).
-4. For Live Mode, open **Settings → Secrets** and add TOML secrets, for example:
+4. For Live Mode, open **Settings → Secrets** and paste TOML secrets. Use [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example) as the template (includes `SERPAPI_API_KEY` for Live job search). Example:
 
 ```toml
 OPENAI_API_KEY = "sk-..."
 WORKFORCE_LLM_MODEL = "openai/gpt-4o-mini"
 FIRECRAWL_API_KEY = ""
-SERPAPI_API_KEY = ""          # Live job search (SerpAPI Google Jobs)
+SERPAPI_API_KEY = "..."       # Live job search (SerpAPI Google Jobs)
 WORKFORCE_PERSISTENCE_ENABLED = "true"
 WORKFORCE_MAX_REVISIONS = "1"
 ```
+
+Locally you can also `cp .streamlit/secrets.toml.example .streamlit/secrets.toml` (that file is gitignored). The app reads the same keys from `.env` or Streamlit secrets.
 
 5. Deploy. Demo Mode works with no secrets.
 
@@ -55,6 +57,8 @@ WORKFORCE_MAX_REVISIONS = "1"
 Live Mode is blocked with a clear error when credentials are missing. The app never silently falls back to Demo Mode.
 
 Optional search: set `FIRECRAWL_API_KEY` (from [firecrawl.dev](https://www.firecrawl.dev/)). Without it, research is labelled model-knowledge / not live-verified and never fabricates URLs.
+
+Live job search: set `SERPAPI_API_KEY` (from [serpapi.com](https://serpapi.com/)) in `.env` or Streamlit secrets TOML. Without it, Live Mode `job_search` is blocked with a clear error; Demo Mode still uses illustrative fixtures.
 
 ## Workshop flow
 
