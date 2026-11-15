@@ -57,6 +57,7 @@ class Settings:
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     firecrawl_api_key: str | None = None
+    serpapi_api_key: str | None = None
     llm_temperature: float = 0.2
     llm_max_tokens: int = 4096
     llm_max_retries: int = 2
@@ -74,6 +75,11 @@ class Settings:
     @property
     def search_configured(self) -> bool:
         return bool(self.firecrawl_api_key)
+
+    @property
+    def jobs_search_configured(self) -> bool:
+        """True when a SerpAPI key is available for Google Jobs (live job_search)."""
+        return bool(self.serpapi_api_key)
 
     @property
     def provider_display_name(self) -> str:
@@ -96,6 +102,7 @@ def get_settings() -> Settings:
         openai_api_key=_env("OPENAI_API_KEY"),
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         firecrawl_api_key=_env("FIRECRAWL_API_KEY"),
+        serpapi_api_key=_env("SERPAPI_API_KEY"),
     )
 
 

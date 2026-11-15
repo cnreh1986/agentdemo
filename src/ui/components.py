@@ -27,7 +27,11 @@ def logo_path() -> str:
 def render_page_brand(*, show_home_link: bool = True, show_page_brand: bool = True) -> None:
     """Logo + edition line in the main content area (all pages)."""
     if show_home_link:
-        st.page_link("pages/0_Home_Page.py", label="Home Page", icon=":material/home:")
+        try:
+            st.page_link("pages/0_Home_Page.py", label="Home Page", icon=":material/home:")
+        except Exception:
+            # AppTest / isolated page scripts lack st.navigation page registry.
+            st.markdown("[Home Page](./)")
     if not show_page_brand:
         return
     if LOGO_PATH.is_file():
@@ -124,9 +128,11 @@ def render_sensitive_warning() -> None:
 def render_mode_status(mode: str, settings: Settings) -> None:
     live_ready = settings.has_llm_credentials
     search_ready = settings.search_configured
+    jobs_ready = settings.jobs_search_configured
     mode_chip = "chip-ok" if mode == "demo" else ("chip-ok" if live_ready else "chip-err")
     live_label = "ready" if live_ready else "missing credentials"
     search_label = "configured" if search_ready else "not configured (research unverified)"
+    jobs_label = "SerpAPI configured" if jobs_ready else "SerpAPI not configured (live job search blocked)"
     st.markdown(
         f"""
         <span class="status-chip {mode_chip}">Mode: {mode.upper()}</span>
@@ -135,6 +141,9 @@ def render_mode_status(mode: str, settings: Settings) -> None:
         </span>
         <span class="status-chip {chip_class('ok' if search_ready else 'wait')}">
           Search: {search_label}
+        </span>
+        <span class="status-chip {chip_class('ok' if jobs_ready else 'wait')}">
+          Jobs: {jobs_label}
         </span>
         """,
         unsafe_allow_html=True,

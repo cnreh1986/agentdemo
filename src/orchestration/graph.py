@@ -39,6 +39,7 @@ def build_workforce_graph(
     provider: LLMProvider,
     *,
     search_provider: SearchProvider | None = None,
+    jobs_provider: Any | None = None,
     prompt_overrides: dict[str, str] | None = None,
     checkpointer: Any | None = None,
     interrupt_after: list[str] | None = None,
@@ -46,6 +47,7 @@ def build_workforce_graph(
     ctx = NodeContext(
         provider,
         search_provider=search_provider,
+        jobs_provider=jobs_provider,
         prompt_overrides=prompt_overrides,
     )
 
@@ -108,6 +110,8 @@ def initial_state(
     run_id: str | None = None,
     model_configuration: dict[str, Any] | None = None,
     demo_disclaimer: str | None = None,
+    job_intent: dict[str, Any] | None = None,
+    comparison_intent: dict[str, Any] | None = None,
 ) -> WorkforceState:
     from datetime import datetime, timezone
     from uuid import uuid4
@@ -134,6 +138,10 @@ def initial_state(
             "output_format": output_format,
         },
         "task_specification": None,
+        "job_intent": job_intent,
+        "job_envelope": None,
+        "comparison_intent": comparison_intent,
+        "comparison_envelope": None,
         "research": None,
         "plan": None,
         "deliverable": None,

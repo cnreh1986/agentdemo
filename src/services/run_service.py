@@ -12,6 +12,8 @@ from src.providers.demo_provider import DemoProvider
 from src.providers.firecrawl_search import FirecrawlSearchProvider
 from src.providers.litellm_provider import LiteLLMProvider
 from src.providers.search_base import NullSearchProvider
+from src.providers.serpapi_jobs import SerpApiJobsProvider
+from src.services.job_intent import classify_task_class
 
 UpdateCallback = Callable[[dict[str, Any]], None]
 
@@ -36,21 +38,42 @@ class RunService:
             return FirecrawlSearchProvider(self.settings)
         return NullSearchProvider()
 
+    def _jobs(self, mode: str):
+        # Demo Mode never calls SerpAPI; Live uses it only for job_search tasks.
+        if mode != "live":
+            return None
+        return SerpApiJobsProvider(self.settings)
+
     def _runner(self, mode: str) -> WorkforceRunner:
         return WorkforceRunner(
             self._provider(mode),
             search_provider=self._search(mode),
+            jobs_provider=self._jobs(mode),
             prompt_overrides=self.prompt_overrides,
             max_revisions=self.settings.max_revisions,
         )
 
-    def _ensure_live_ready(self, mode: str) -> None:
+    def _ensure_live_ready(
+        self,
+        mode: str,
+        *,
+        task: str = "",
+        background: str = "",
+        constraints: str = "",
+        job_intent: dict[str, Any] | None = None,
+    ) -> None:
         if mode == "live" and not self.settings.has_llm_credentials:
             raise RuntimeError(
                 "Live LLM Mode requires provider credentials. "
                 "Configure OPENAI_API_KEY (or matching provider key). "
                 "The app will not fall back to Demo Mode."
             )
+        if mode == "live" and not self.settings.jobs_search_configured:
+            if job_intent or classify_task_class(task, background, constraints) == "job_search":
+                raise RuntimeError(
+                    "Live job search requires SERPAPI_API_KEY (SerpAPI Google Jobs). "
+                    "Configure it, or use Demo Mode. The app will not invent listings."
+                )
 
     def start_run(
         self,
@@ -62,8 +85,12 @@ class RunService:
         output_format: str = "Briefing",
         mode: str = "demo",
         on_update: UpdateCallback | None = None,
+        job_intent: dict[str, Any] | None = None,
+        comparison_intent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._ensure_live_ready(mode)
+        self._ensure_live_ready(
+            mode, task=task, background=background, constraints=constraints, job_intent=job_intent
+        )
         return self._runner(mode).run(
             task=task,
             background=background,
@@ -72,6 +99,8 @@ class RunService:
             output_format=output_format,
             mode=mode,
             on_update=on_update,
+            job_intent=job_intent,
+            comparison_intent=comparison_intent,
         )
 
     def begin_run(
@@ -84,9 +113,13 @@ class RunService:
         output_format: str = "Briefing",
         mode: str = "demo",
         on_update: UpdateCallback | None = None,
+        job_intent: dict[str, Any] | None = None,
+        comparison_intent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start a run and return after the first stage boundary."""
-        self._ensure_live_ready(mode)
+        self._ensure_live_ready(
+            mode, task=task, background=background, constraints=constraints, job_intent=job_intent
+        )
         return self._runner(mode).begin_run(
             task=task,
             background=background,
@@ -95,6 +128,8 @@ class RunService:
             output_format=output_format,
             mode=mode,
             on_update=on_update,
+            job_intent=job_intent,
+            comparison_intent=comparison_intent,
         )
 
     def advance_run(

@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from src.config.prompts import get_prompt
+from src.config.prompts import get_prompt, get_task_class_addendum
 from src.models.agent import AgentResult
 from src.models.task import TaskSpec
 from src.providers.llm_base import LLMProvider, ProviderError
@@ -45,7 +45,8 @@ class Agent(ABC):
         raise NotImplementedError
 
     def system_prompt(self) -> str:
-        return get_prompt(self.name, self.prompt_overrides)
+        base = get_prompt(self.name, self.prompt_overrides)
+        return base + get_task_class_addendum(self.name, getattr(self, "_task_class", None))
 
     def prepare_raw_output(self, raw: dict[str, Any], task: TaskSpec, context: dict[str, Any]) -> dict[str, Any]:
         """Hook for subclasses to normalize provider JSON before validation."""
@@ -53,6 +54,7 @@ class Agent(ABC):
 
     def run(self, task: TaskSpec, context: dict[str, Any] | None = None) -> AgentResult:
         context = context or {}
+        self._task_class = getattr(task, "task_class", "briefing")
         started = time.perf_counter()
         user_prompt = self.build_user_prompt(task, context)
         try:

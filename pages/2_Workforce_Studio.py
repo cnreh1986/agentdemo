@@ -22,6 +22,7 @@ from src.ui.components import (
     render_run_notice,
     render_sensitive_warning,
 )
+from src.ui.intent_confirm import render_intent_confirm
 from src.ui.output_views import render_agent_inspector, render_approval_panel, render_output_tabs
 from src.ui.workflow_view import render_event_feed, render_pipeline
 
@@ -322,6 +323,22 @@ st.caption(
     "Manage saved templates on the **Task Manager** page. **New Task** clears the form."
 )
 
+_confirm_busy = bool(
+    st.session_state.run_in_progress
+    or st.session_state.run_continue
+    or st.session_state.ready_for_next_stage
+)
+class_choice = {"task_class": "briefing", "job_intent": None, "comparison_intent": None, "blocked": None}
+if not _confirm_busy:
+    class_choice = render_intent_confirm(
+        st.session_state.task_text,
+        st.session_state.background_text,
+        st.session_state.constraints_text,
+        st.session_state.time_horizon_text,
+        mode=mode,
+        settings=settings,
+    )
+
 st.checkbox(
     "Auto-approve when ready (skips the Approve button for this session)",
     key="auto_approve_enabled",
@@ -480,6 +497,8 @@ if run_clicked and not st.session_state.run_in_progress and not paused_now:
             "Add OPENAI_API_KEY (or matching provider key) and restart. "
             "The app will not silently switch to Demo Mode."
         )
+    elif mode == "live" and class_choice.get("blocked"):
+        st.error(class_choice["blocked"])
     else:
         st.session_state.pause_requested = False
         st.session_state.run_continue = False
@@ -504,6 +523,8 @@ if run_clicked and not st.session_state.run_in_progress and not paused_now:
                 output_format=validation.output_format,
                 mode=mode,
                 on_update=_run_overlay_callback(overlay_slot),
+                job_intent=class_choice.get("job_intent"),
+                comparison_intent=class_choice.get("comparison_intent"),
             )
             more = service.run_has_more_stages(result) and (result.get("status") or "") != "FAILED"
             _finalize_stage_result(service, result, more_stages=more)
@@ -636,7 +657,7 @@ if action and run_state:
 if run_state and (run_state.get("deliverable") or run_state.get("research")):
     exporter = ExportService()
     st.subheader("Downloads")
-    cols = st.columns(4)
+    cols = st.columns(5)
     if run_state.get("deliverable"):
         md_name, md = exporter.markdown_briefing(run_state)
         json_name, js = exporter.json_bundle(run_state)
@@ -665,12 +686,32 @@ if run_state and (run_state.get("deliverable") or run_state.get("research")):
                 mime="application/zip",
             ):
                 _bump_export()
-    if run_state.get("research"):
+    if run_state.get("job_envelope") or run_state.get("comparison_envelope"):
+        csv_name, csv_text = (
+            exporter.jobs_csv(run_state)
+            if run_state.get("job_envelope")
+            else exporter.comparison_csv(run_state)
+        )
+        with cols[4]:
+            if st.download_button(
+                "Download CSV (included jobs)" if run_state.get("job_envelope") else "Download CSV (matrix cells)",
+                data=csv_text,
+                file_name=csv_name,
+                mime="text/csv",
+            ):
+                _bump_export()
+    if (
+        run_state.get("research")
+        or run_state.get("deliverable")
+        or run_state.get("plan")
+        or run_state.get("job_envelope")
+        or run_state.get("comparison_envelope")
+    ):
         try:
             docx_name, docx_bytes = exporter.research_docx(run_state)
             with cols[3]:
                 if st.download_button(
-                    "Download Research (Word)",
+                    "Download Word (PRD report)",
                     data=docx_bytes,
                     file_name=docx_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

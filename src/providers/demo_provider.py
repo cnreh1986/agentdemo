@@ -51,6 +51,11 @@ class DemoProvider(LLMProvider):
                 output_format=payload.get("output_format", "Briefing"),
                 execution_mode="demo",
             )
+        task_class = payload.get("task_class") or "briefing"
+        if task_class != "briefing" and schema_name in {"plan", "deliverable", "review"}:
+            special = self._complete_task_class(schema_name, task_class, payload, task)
+            if special is not None:
+                return special
         if schema_name == "research":
             return build_research_packet(run_id, task)
         if schema_name == "plan":
@@ -69,6 +74,37 @@ class DemoProvider(LLMProvider):
                 return build_review(revision_required=True, quality_score=68)
             return build_review(revision_required=False, quality_score=86)
         raise ValueError(f"Unknown schema_name for DemoProvider: {schema_name}")
+
+    def _complete_task_class(
+        self, schema_name: str, task_class: str, payload: dict[str, Any], task: str
+    ) -> dict[str, Any] | None:
+        """Demo responses for job_search / competitive_analysis built from the envelope."""
+        from src.models.competitive_analysis import ComparisonEnvelope
+        from src.models.job_search import JobSearchEnvelope
+        from src.services import task_class_packets as packets
+
+        if task_class == "job_search" and payload.get("job_envelope"):
+            env = JobSearchEnvelope.model_validate(payload["job_envelope"])
+            plan, deliverable = packets.job_plan, packets.job_deliverable_fields
+        elif task_class == "competitive_analysis" and payload.get("comparison_envelope"):
+            env = ComparisonEnvelope.model_validate(payload["comparison_envelope"])
+            plan, deliverable = packets.comparison_plan, packets.comparison_deliverable_fields
+        else:
+            return None
+        if schema_name == "plan":
+            return plan(task, env)
+        if schema_name == "deliverable":
+            self._execution_calls += 1
+            return deliverable(
+                env, revised=self._execution_calls > 1 or bool(payload.get("revision_instructions"))
+            )
+        # Review: the deterministic envelope checks decide; no forced demo revision here.
+        review = build_review(revision_required=False, quality_score=86)
+        review["reviewer_summary"] = (
+            "Demo review of the typed envelope; deterministic task-class checks are applied by code. "
+            "This is not automatic human approval."
+        )
+        return review
 
     def _parse_user(self, user_prompt: str) -> dict[str, Any]:
         try:

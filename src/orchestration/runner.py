@@ -73,12 +73,14 @@ class WorkforceRunner:
         provider: LLMProvider | None = None,
         *,
         search_provider: SearchProvider | None = None,
+        jobs_provider: Any | None = None,
         prompt_overrides: dict[str, str] | None = None,
         max_revisions: int | None = None,
     ):
         settings = get_settings()
         self.provider = provider or DemoProvider()
         self.search_provider = search_provider or NullSearchProvider()
+        self.jobs_provider = jobs_provider
         self.prompt_overrides = prompt_overrides or {}
         self.max_revisions = (
             max_revisions if max_revisions is not None else settings.max_revisions
@@ -86,6 +88,7 @@ class WorkforceRunner:
         self.graph = build_workforce_graph(
             self.provider,
             search_provider=self.search_provider,
+            jobs_provider=self.jobs_provider,
             prompt_overrides=self.prompt_overrides,
             checkpointer=_SHARED_CHECKPOINTER,
             interrupt_after=STAGE_INTERRUPT_AFTER,
@@ -127,6 +130,8 @@ class WorkforceRunner:
         output_format: str = "Briefing",
         mode: str = "demo",
         on_update: UpdateCallback | None = None,
+        job_intent: dict[str, Any] | None = None,
+        comparison_intent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run until the first stage interrupt (or terminal)."""
         status = self.provider.status()
@@ -143,6 +148,8 @@ class WorkforceRunner:
                 "model": status.model_name,
                 "live": mode == "live",
             },
+            job_intent=job_intent,
+            comparison_intent=comparison_intent,
         )
         if on_update:
             on_update(dict(seed))
@@ -175,6 +182,8 @@ class WorkforceRunner:
         on_update: UpdateCallback | None = None,
         human_revision_instruction: str | None = None,
         prior_state: dict[str, Any] | None = None,
+        job_intent: dict[str, Any] | None = None,
+        comparison_intent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if prior_state and human_revision_instruction:
             state = dict(prior_state)
@@ -195,6 +204,10 @@ class WorkforceRunner:
             seed.update(
                 {
                     "task_specification": state.get("task_specification"),
+                    "job_intent": state.get("job_intent"),
+                    "job_envelope": state.get("job_envelope"),
+                    "comparison_intent": state.get("comparison_intent"),
+                    "comparison_envelope": state.get("comparison_envelope"),
                     "research": state.get("research"),
                     "plan": state.get("plan"),
                     "deliverable": state.get("deliverable"),
@@ -214,6 +227,7 @@ class WorkforceRunner:
                 self.provider,
                 seed,
                 search_provider=self.search_provider,
+                jobs_provider=self.jobs_provider,
                 prompt_overrides=self.prompt_overrides,
                 on_update=on_update,
             )
@@ -226,6 +240,8 @@ class WorkforceRunner:
             output_format=output_format,
             mode=mode,
             on_update=on_update,
+            job_intent=job_intent,
+            comparison_intent=comparison_intent,
         )
         run_id = state["run_id"]
         while self._has_pending(run_id) and (state.get("status") or "") != "FAILED":

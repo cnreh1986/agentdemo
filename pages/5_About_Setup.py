@@ -23,6 +23,7 @@ Workshop learning application that demonstrates a transparent multi-agent workfo
 - Live Mode sends task context to your configured provider — configure keys via environment or Streamlit secrets.
 - Do not submit confidential or sensitive information.
 - Human approval is separate from LLM reviewer approval.
+- Job search uses SerpAPI Google Jobs only (no Naukri/LinkedIn scraping), never applies to a job, and never invents listings. Demo Mode uses labelled fixtures.
 """
 )
 
@@ -33,6 +34,7 @@ st.code(
 provider={settings.provider_display_name}
 llm_credentials={'configured' if settings.has_llm_credentials else 'missing'}
 search={'configured' if settings.search_configured else 'not configured'}
+jobs_search={'SerpAPI configured' if settings.jobs_search_configured else 'SerpAPI not configured (Live job_search blocked; Demo Mode unaffected)'}
 max_revisions={settings.max_revisions}
 persistence={settings.persistence_enabled}
 """,

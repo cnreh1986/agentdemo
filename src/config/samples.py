@@ -28,6 +28,46 @@ SAMPLE_TASKS: dict[str, dict[str, str]] = {
     },
 }
 
+SAMPLE_JOBS_LABEL = "Find product manager jobs in Hyderabad (5–10 years, last 7 days)"
+SAMPLE_COMPARE_RICH_LABEL = "Compare product manager and product marketer (example company context)"
+SAMPLE_COMPARE_THIN_LABEL = "Compare product manager and product marketer (needs context)"
+
+SAMPLE_TASKS[SAMPLE_JOBS_LABEL] = {
+    "task": (
+        "Find product manager jobs in Hyderabad, 5–10 years of experience, "
+        "posted in the last 7 days."
+    ),
+    "background": "",
+    "constraints": "Hyderabad, India only; do not apply or contact anyone.",
+    "time_horizon": "This week",
+    "output_format": "Job search results",
+}
+
+SAMPLE_TASKS[SAMPLE_COMPARE_RICH_LABEL] = {
+    "task": "Compare product manager and product marketer for our next hire.",
+    "background": (
+        "We are an 80-person B2B SaaS company in Hyderabad. We sell accounts-payable software "
+        "to mid-market finance teams in India. We have one technical product manager. "
+        "We have no product marketer. Sales is founder-led. Our product manager already writes "
+        "the release notes and joins the first sales call. "
+        "(Fictional example company for the workshop.)"
+    ),
+    "constraints": (
+        "One headcount next quarter. Audience is the founder. Do not name a candidate. "
+        "Do not turn this into a job advertisement."
+    ),
+    "time_horizon": "Next quarter",
+    "output_format": "Comparison matrix",
+}
+
+SAMPLE_TASKS[SAMPLE_COMPARE_THIN_LABEL] = {
+    "task": "Compare product manager and product marketer. I will provide the context.",
+    "background": "",
+    "constraints": "",
+    "time_horizon": "",
+    "output_format": "Comparison matrix",
+}
+
 SAMPLE_TASK_LABELS = list(SAMPLE_TASKS.keys())
 
 # Stable ids for system/demo tasks shown in Task Manager (not stored as files).
@@ -35,6 +75,9 @@ _SYSTEM_TASK_IDS: dict[str, str] = {
     "Plan my next productive week.": "system-plan-week",
     "Research a product opportunity and prepare a brief.": "system-product-brief",
     "Create a learning roadmap for a new skill.": "system-learning-roadmap",
+    SAMPLE_JOBS_LABEL: "system-job-search-hyderabad-pm",
+    SAMPLE_COMPARE_RICH_LABEL: "system-compare-pm-pmm-context",
+    SAMPLE_COMPARE_THIN_LABEL: "system-compare-pm-pmm-thin",
 }
 
 OUTPUT_FORMATS = [
@@ -42,6 +85,8 @@ OUTPUT_FORMATS = [
     "Action Plan",
     "Research Summary",
     "Markdown bundle",
+    "Job search results",
+    "Comparison matrix",
 ]
 
 

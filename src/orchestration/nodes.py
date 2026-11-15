@@ -14,6 +14,11 @@ from src.config.prompts import get_prompt
 from src.config.validation import validate_task_input
 from src.demo.fixtures import build_task_spec
 from src.models.task import TaskSpec
+from src.services.comparison_intent import (
+    comparison_success_criteria,
+    parse_competitive_analysis_intent,
+)
+from src.services.job_intent import classify_task_class, job_success_criteria, parse_job_search_intent
 from src.orchestration.events import make_event
 from src.orchestration.state import WorkforceState
 from src.providers.llm_base import LLMProvider
@@ -30,13 +35,18 @@ class NodeContext:
         provider: LLMProvider,
         *,
         search_provider: SearchProvider | None = None,
+        jobs_provider: Any | None = None,
         prompt_overrides: dict[str, str] | None = None,
     ):
         self.provider = provider
         self.search_provider = search_provider
+        self.jobs_provider = jobs_provider
         self.prompt_overrides = prompt_overrides or {}
         self.research_agent = ResearchAgent(
-            provider, search_provider=search_provider, prompt_overrides=self.prompt_overrides
+            provider,
+            search_provider=search_provider,
+            jobs_provider=jobs_provider,
+            prompt_overrides=self.prompt_overrides,
         )
         self.planning_agent = PlanningAgent(provider, prompt_overrides=self.prompt_overrides)
         self.execution_agent = ExecutionAgent(provider, prompt_overrides=self.prompt_overrides)
@@ -96,6 +106,41 @@ def validate_node(state: WorkforceState) -> dict[str, Any]:
     }
 
 
+def _resolve_task_class(state: WorkforceState, task_input: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Pick the task class and typed intent. A user-confirmed intent in state wins."""
+    task = task_input.get("task", "")
+    background = task_input.get("background", "")
+    constraints = task_input.get("constraints", "")
+    horizon = task_input.get("time_horizon", "")
+    if state.get("comparison_intent"):
+        task_class = "competitive_analysis"
+    elif state.get("job_intent"):
+        task_class = "job_search"
+    else:
+        task_class = classify_task_class(task, background, constraints)
+    if task_class == "job_search":
+        intent = state.get("job_intent") or parse_job_search_intent(task, background, constraints).model_dump(mode="json")
+        return task_class, {"job_intent": intent}
+    if task_class == "competitive_analysis":
+        intent = state.get("comparison_intent") or parse_competitive_analysis_intent(
+            task, background, constraints, horizon
+        ).model_dump(mode="json")
+        return task_class, {"comparison_intent": intent}
+    return "briefing", {}
+
+
+def class_context(state: WorkforceState) -> dict[str, Any]:
+    """Task-class inputs handed to agents. Empty for briefing runs."""
+    ctx: dict[str, Any] = {}
+    for key in ("job_intent", "job_envelope", "comparison_intent", "comparison_envelope"):
+        if state.get(key):
+            ctx[key] = state[key]
+    return ctx
+
+
+_ARTIFACT_KEYS = {"job_envelope": "job_envelope", "comparison_envelope": "comparison_envelope"}
+
+
 def specify_node(state: WorkforceState, ctx: NodeContext) -> dict[str, Any]:
     run_id = state["run_id"]
     if state.get("status") == "FAILED":
@@ -126,16 +171,36 @@ def specify_node(state: WorkforceState, ctx: NodeContext) -> dict[str, Any]:
             execution_mode=mode,  # type: ignore[arg-type]
             model_configuration=model_configuration,
         )
+    task_class, class_updates = _resolve_task_class(state, task_input)
+    spec["task_class"] = task_class
+    if mode in {"demo", "live"}:
+        spec["execution_mode"] = mode
+    if task_class == "job_search":
+        from src.models.job_search import JobSearchIntent
+
+        spec["success_criteria"] = job_success_criteria(JobSearchIntent.model_validate(class_updates["job_intent"]))
+    elif task_class == "competitive_analysis":
+        from src.models.competitive_analysis import CompetitiveAnalysisIntent
+
+        spec["success_criteria"] = comparison_success_criteria(
+            CompetitiveAnalysisIntent.model_validate(class_updates["comparison_intent"])
+        )
     return {
         "status": "SPECIFICATION_CREATED",
         "task_specification": spec,
+        **class_updates,
         "events": [
             make_event(
                 run_id=run_id,
                 stage="orchestrator",
                 event_type="specification_created",
                 status="completed",
-                message="Orchestrator completed task specification.",
+                message=(
+                    "Orchestrator completed task specification."
+                    if task_class == "briefing"
+                    else f"Orchestrator completed task specification (task class: {task_class})."
+                ),
+                metadata={"task_class": task_class},
             )
         ],
         "node_states": {"orchestrator": "Completed"},
@@ -165,6 +230,7 @@ def _run_agent_node(
     store_key: str,
     handoff_to: str,
     preserve_original_deliverable: bool = False,
+    artifact_keys: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     run_id = state["run_id"]
     if state.get("status") == "FAILED":
@@ -243,6 +309,9 @@ def _run_agent_node(
         },
         "updated_at": _now(),
     }
+    for artifact, dest in (artifact_keys or {}).items():
+        if artifact in result.artifacts:
+            updates[dest] = result.artifacts[artifact]
     if preserve_original_deliverable and not state.get("deliverable_original"):
         updates["deliverable_original"] = result.output
     if result.status == "needs_revision":
@@ -271,9 +340,14 @@ def make_research_node(ctx: NodeContext):
             running_status="RESEARCH_RUNNING",
             completed_status="RESEARCH_COMPLETED",
             runner=ctx.research_agent.run,
-            context_builder=lambda s: {"task_specification": s.get("task_specification")},
+            context_builder=lambda s: {
+                "task_specification": s.get("task_specification"),
+                "mode": s.get("mode"),
+                **class_context(s),
+            },
             store_key="research",
             handoff_to="planning",
+            artifact_keys=_ARTIFACT_KEYS,
         )
 
     return research_node
@@ -289,6 +363,7 @@ def make_planning_node(ctx: NodeContext):
             runner=ctx.planning_agent.run,
             context_builder=lambda s: {
                 "research": s.get("research"),
+                **class_context(s),
             },
             store_key="plan",
             handoff_to="execution",
@@ -311,10 +386,12 @@ def make_execution_node(ctx: NodeContext):
                 "plan": s.get("plan"),
                 "revision_instructions": instructions,
                 "prior_deliverable": s.get("deliverable"),
+                **class_context(s),
             },
             store_key="deliverable",
             handoff_to="reviewer",
             preserve_original_deliverable=True,
+            artifact_keys=_ARTIFACT_KEYS,
         )
 
     return execution_node
@@ -332,6 +409,7 @@ def make_review_node(ctx: NodeContext):
                 "research": s.get("research"),
                 "plan": s.get("plan"),
                 "deliverable": s.get("deliverable"),
+                **class_context(s),
             },
             store_key="review",
             handoff_to="human_approval",

@@ -14,6 +14,9 @@ class TaskInput(BaseModel):
     output_format: str = "Briefing"
 
 
+TaskClass = Literal["briefing", "job_search", "competitive_analysis"]
+
+
 class TaskSpec(BaseModel):
     run_id: str
     original_task: str
@@ -23,6 +26,7 @@ class TaskSpec(BaseModel):
     time_horizon: str = "Not specified"
     requested_output: str = "Briefing"
     success_criteria: list[str] = Field(default_factory=list)
+    task_class: TaskClass = "briefing"
     created_at: datetime | str
     execution_mode: Literal["demo", "live"]
     model_configuration: dict[str, Any] = Field(default_factory=dict)

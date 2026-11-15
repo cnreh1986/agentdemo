@@ -21,6 +21,11 @@ class WorkforceState(TypedDict, total=False):
     max_revisions: int
     task_input: dict[str, Any]
     task_specification: dict[str, Any] | None
+    # Task-class extensions (job_search / competitive_analysis); None for briefing.
+    job_intent: dict[str, Any] | None
+    job_envelope: dict[str, Any] | None
+    comparison_intent: dict[str, Any] | None
+    comparison_envelope: dict[str, Any] | None
     research: dict[str, Any] | None
     plan: dict[str, Any] | None
     deliverable: dict[str, Any] | None

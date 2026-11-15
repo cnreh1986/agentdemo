@@ -33,7 +33,7 @@ def render_output_tabs(run_state: dict[str, Any] | None) -> None:
 
                 docx_name, docx_bytes = ExportService().research_docx(run_state)
                 st.download_button(
-                    "Download Research (Word)",
+                    "Download Word (PRD report)",
                     data=docx_bytes,
                     file_name=docx_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -84,6 +84,19 @@ def render_output_tabs(run_state: dict[str, Any] | None) -> None:
         deliverable = run_state.get("deliverable")
         if not deliverable:
             st.write("No deliverable yet.")
+        elif run_state.get("job_envelope") or run_state.get("comparison_envelope"):
+            from src.ui.task_class_views import render_comparison_envelope, render_job_envelope
+
+            if deliverable.get("executive_summary"):
+                st.markdown(deliverable["executive_summary"])
+            if run_state.get("job_envelope"):
+                render_job_envelope(run_state["job_envelope"])
+            else:
+                render_comparison_envelope(run_state["comparison_envelope"])
+            with st.expander("Markdown view"):
+                st.markdown(deliverable.get("markdown_content") or "")
+            with st.expander("Structured metadata"):
+                st.code(_json({k: v for k, v in deliverable.items() if k != "markdown_content"}), language="json")
         else:
             st.markdown(deliverable.get("markdown_content") or deliverable.get("executive_summary", ""))
             with st.expander("Structured metadata"):

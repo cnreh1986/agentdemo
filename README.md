@@ -36,6 +36,7 @@ This is a Streamlit app — deploy it on [Streamlit Community Cloud](https://sha
 OPENAI_API_KEY = "sk-..."
 WORKFORCE_LLM_MODEL = "openai/gpt-4o-mini"
 FIRECRAWL_API_KEY = ""
+SERPAPI_API_KEY = ""          # Live job search (SerpAPI Google Jobs)
 WORKFORCE_PERSISTENCE_ENABLED = "true"
 WORKFORCE_MAX_REVISIONS = "1"
 ```
@@ -97,3 +98,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [IMPLEMENTATION_PLAN.md](IMPLEMENTATI
 | Live Mode blocked | Set `OPENAI_API_KEY` (or matching provider key) in `.env` and restart |
 | Import errors when running tests | Run from repo root with `pytest` (uses `pythonpath = .`) |
 | DB errors | App continues in session mode; delete `data/workforce.db` if corrupted |
+
+## Job search and comparison tasks
+
+Tasks are classified as `briefing`, `job_search`, or `competitive_analysis`. Job search in Live Mode needs `SERPAPI_API_KEY` (SerpAPI Google Jobs); there is no scraping of job boards and listings are never invented. Demo Mode uses labelled fixtures. Tests and manual guides are in [`testing/`](testing/README.md).

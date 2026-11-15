@@ -352,3 +352,122 @@ def build_demo_packets(
         ),
         "review_v2": build_review(revision_required=False, quality_score=86),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Task-class fixtures (job_search / competitive_analysis). No network, no model.
+# --------------------------------------------------------------------------- #
+
+DEMO_JOB_SOURCE = "demo"
+_DEMO_URL_BASE = "https://example.invalid/jobs/"
+
+
+def build_demo_job_records(retrieved_at: datetime | None = None) -> list:
+    """Illustrative rows with obvious fake ids and example.invalid URLs.
+
+    Mix is chosen so the filters are visible: included (exact + overlap), needs-review,
+    and several excluded reasons (wrong role, wrong city, stale, no band overlap).
+    """
+    from datetime import timedelta
+
+    from src.models.job_search import JobRecord
+
+    now = retrieved_at or datetime.now(timezone.utc)
+
+    def rec(
+        n: str,
+        title: str,
+        company: str,
+        loc: str,
+        days_ago: int,
+        exp_text: str | None,
+        desc: str,
+        *,
+        city: str | None = None,
+    ) -> JobRecord:
+        job_id = f"demo-{n}"
+        return JobRecord(
+            job_id=job_id,
+            source=DEMO_JOB_SOURCE,
+            source_job_id=job_id,
+            title=title,
+            company_name=company,
+            job_description=f"{desc} (Illustrative demo description, not a real posting.)",
+            description_completeness="full",
+            location_text=loc,
+            city=city or loc.split(",")[0],
+            country_code="IN",
+            date_posted=(now - timedelta(days=days_ago)).isoformat(),
+            experience_text=exp_text,
+            employment_type="Full-time",
+            workplace="onsite",
+            apply_url=f"{_DEMO_URL_BASE}{job_id}",
+            retrieved_at=now.isoformat(),
+        )
+
+    return [
+        rec("hyd-pm-1", "Senior Product Manager", "Example Software Pvt Ltd", "Hyderabad, Telangana", 2, "6-9 years",
+            "Own the roadmap for a B2B workflow product and partner with engineering and design."),
+        rec("hyd-pm-2", "Lead Product Manager - Platform", "Sample Cloud Labs", "Gachibowli, Hyderabad, Telangana", 4, "4-7 years",
+            "Lead platform product strategy and developer experience.", city="Hyderabad"),
+        rec("hyd-pm-3", "Product Manager, Payments", "Placeholder Fintech Pvt Ltd", "HITEC City, Hyderabad, Telangana", 5, "8-12 years",
+            "Drive payments product discovery and delivery.", city="Hyderabad"),
+        rec("hyd-pm-4", "Group Product Manager", "Illustrative Retail Tech", "Hyderabad, Telangana", 3, None,
+            "Lead a group of product managers across the commerce suite."),
+        rec("hyd-prj-5", "Project Manager", "Example Software Pvt Ltd", "Hyderabad, Telangana", 1, "6-9 years",
+            "Manage delivery timelines and vendor coordination."),
+        rec("blr-pm-6", "Product Manager", "Demo Analytics Co", "Bengaluru, Karnataka", 2, "6-8 years",
+            "Own analytics product experience."),
+        rec("hyd-pm-7", "Product Manager", "Fixture Systems", "Hyderabad, Telangana", 20, "5-8 years",
+            "Posted well outside the requested window."),
+        rec("hyd-apm-8", "Associate Product Manager", "Mock Learning Pvt Ltd", "Hyderabad, Telangana", 2, "1-3 years",
+            "Entry-level product role."),
+    ]
+
+
+def build_demo_job_envelope(
+    intent: Any | None = None,
+    *,
+    retrieved_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Illustrative job envelope run through the real filters (include/needs_review/exclude)."""
+    from src.models.job_search import JobSearchIntent
+    from src.services.job_intent import apply_job_filters, parse_job_search_intent
+
+    now = retrieved_at or datetime.now(timezone.utc)
+    if intent is None:
+        intent = parse_job_search_intent(
+            "Find product manager jobs in Hyderabad, 5-10 years of experience, posted in the last 7 days."
+        )
+    elif isinstance(intent, dict):
+        intent = JobSearchIntent.model_validate(intent)
+    envelope = apply_job_filters(
+        build_demo_job_records(now),
+        intent,
+        retrieved_at=now,
+        source_name=DEMO_JOB_SOURCE,
+        illustrative=True,
+        extra_notes=["Demo Mode fixtures: no network call was made."],
+    )
+    return envelope.model_dump(mode="json")
+
+
+def build_demo_comparison_envelope(intent: Any | None = None) -> dict[str, Any]:
+    """Illustrative comparison envelope; defaults to the PM vs Product Marketer sample context."""
+    from src.models.competitive_analysis import CompetitiveAnalysisIntent
+    from src.services.comparison_intent import (
+        build_comparison_envelope,
+        parse_competitive_analysis_intent,
+    )
+
+    if intent is None:
+        from src.config.samples import SAMPLE_TASKS, SAMPLE_COMPARE_RICH_LABEL
+
+        packet = SAMPLE_TASKS[SAMPLE_COMPARE_RICH_LABEL]
+        intent = parse_competitive_analysis_intent(
+            packet["task"], packet["background"], packet["constraints"], packet["time_horizon"]
+        )
+    elif isinstance(intent, dict):
+        intent = CompetitiveAnalysisIntent.model_validate(intent)
+    envelope = build_comparison_envelope(intent, illustrative=True)
+    return envelope.model_dump(mode="json")

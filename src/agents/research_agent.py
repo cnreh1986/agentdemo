@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 from src.agents.base import Agent
+from src.models.agent import AgentResult
+from src.models.competitive_analysis import (
+    CompetitiveAnalysisIntent,
+    ComparisonEnvelope,
+    ComparisonEvidenceItem,
+)
+from src.models.job_search import JobSearchEnvelope, JobSearchIntent
 from src.models.research import EvidenceItem, EvidenceType, ResearchPacket
 from src.models.task import TaskSpec
 from src.providers.search_base import SearchProvider, SearchResult
+
+LIVE_JOBS_REQUIRED_MESSAGE = (
+    "Live job search requires SERPAPI_API_KEY (SerpAPI Google Jobs). "
+    "Set it in the environment or Streamlit secrets, or use Demo Mode. "
+    "The app will not invent listings or fall back to model knowledge."
+)
 
 
 class ResearchAgent(Agent):
@@ -14,9 +29,17 @@ class ResearchAgent(Agent):
     schema_name = "research"
     output_model = ResearchPacket
 
-    def __init__(self, provider, *, search_provider: SearchProvider | None = None, **kwargs):
+    def __init__(
+        self,
+        provider,
+        *,
+        search_provider: SearchProvider | None = None,
+        jobs_provider: Any | None = None,
+        **kwargs,
+    ):
         super().__init__(provider, **kwargs)
         self.search_provider = search_provider
+        self.jobs_provider = jobs_provider
 
     def build_user_prompt(self, task: TaskSpec, context: dict[str, Any]) -> str:
         search_block: list[dict[str, Any]] = []
@@ -73,6 +96,159 @@ class ResearchAgent(Agent):
         return data
 
     def run(self, task: TaskSpec, context: dict[str, Any] | None = None) -> Any:
+        task_class = getattr(task, "task_class", "briefing")
+        if task_class == "job_search":
+            return self._run_job_search(task, context or {})
+        if task_class == "competitive_analysis":
+            return self._run_comparison(task, context or {})
+        return self._run_briefing(task, context)
+
+    # ------------------------------------------------------------ job_search
+    def _run_job_search(self, task: TaskSpec, context: dict[str, Any]) -> AgentResult:
+        from src.demo.fixtures import build_demo_job_envelope
+        from src.services.job_intent import (
+            apply_job_filters,
+            ground_job_envelope,
+            parse_job_search_intent,
+        )
+        from src.services.task_class_packets import job_research_packet
+
+        started = time.perf_counter()
+        mode = context.get("mode") or task.execution_mode
+        raw_intent = context.get("job_intent")
+        intent = (
+            JobSearchIntent.model_validate(raw_intent)
+            if raw_intent
+            else parse_job_search_intent(task.original_task, task.background, task.constraints)
+        )
+        if mode == "demo":
+            envelope = JobSearchEnvelope.model_validate(build_demo_job_envelope(intent))
+        else:
+            provider = self.jobs_provider
+            if provider is None:
+                from src.providers.serpapi_jobs import SerpApiJobsProvider
+
+                provider = SerpApiJobsProvider()
+            if not provider.is_configured():
+                return AgentResult(
+                    agent_name=self.name,
+                    status="failed",
+                    summary=LIVE_JOBS_REQUIRED_MESSAGE,
+                    output={},
+                    issues=[LIVE_JOBS_REQUIRED_MESSAGE],
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+            failed: list[str] = []
+            records: list = []
+            retrieved_at = datetime.now(timezone.utc).isoformat()
+            try:
+                fetch = provider.search(intent)
+                records, retrieved_at = fetch.records, fetch.retrieved_at or retrieved_at
+            except Exception as exc:  # noqa: BLE001 - a failed source is an empty contribution
+                failed.append(str(exc)[:200])
+            envelope = apply_job_filters(
+                records,
+                intent,
+                retrieved_at=retrieved_at,
+                source_name=getattr(provider, "source_name", "serpapi"),
+                sources_failed=failed,
+            )
+        envelope, dropped = ground_job_envelope(envelope)
+        packet = ResearchPacket.model_validate(
+            job_research_packet(task.run_id, task.original_task, envelope, mode=mode)
+        ).model_dump(mode="json")
+        return AgentResult(
+            agent_name=self.name,
+            status="completed",
+            summary=packet["agent_summary"],
+            output=packet,
+            artifacts={"job_envelope": envelope.model_dump(mode="json")},
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    # ---------------------------------------------------- competitive_analysis
+    def _run_comparison(self, task: TaskSpec, context: dict[str, Any]) -> AgentResult:
+        from src.demo.fixtures import build_demo_comparison_envelope
+        from src.services.comparison_intent import (
+            HIRING_CRITERIA,
+            CATALOG_BY_ID,
+            build_comparison_envelope,
+            parse_competitive_analysis_intent,
+        )
+        from src.services.task_class_packets import comparison_research_packet
+
+        started = time.perf_counter()
+        mode = context.get("mode") or task.execution_mode
+        raw_intent = context.get("comparison_intent")
+        intent = (
+            CompetitiveAnalysisIntent.model_validate(raw_intent)
+            if raw_intent
+            else parse_competitive_analysis_intent(
+                task.original_task, task.background, task.constraints, task.time_horizon
+            )
+        )
+        public_evidence: dict[str, list[ComparisonEvidenceItem]] = {}
+        public_items: list[dict[str, Any]] = []
+        note: str | None = None
+        if mode == "demo":
+            envelope = ComparisonEnvelope.model_validate(build_demo_comparison_envelope(intent))
+        else:
+            if intent.status == "ready" and {s.subject_id for s in intent.subjects} == {"pm", "pmm"}:
+                if self.search_provider and self.search_provider.is_configured():
+                    labels = " versus ".join(s.label.lower() for s in intent.subjects)
+                    for crit in [c for c in HIRING_CRITERIA if c != "pricing"][:4]:
+                        row = CATALOG_BY_ID[crit]
+                        query = f"{labels} {row['label'].lower()} responsibilities"
+                        try:
+                            results = self.search_provider.search(query, max_results=2)
+                        except Exception as exc:  # noqa: BLE001
+                            note = f"Public search failed for part of the matrix ({str(exc)[:80]}); defaults are unverified."
+                            continue
+                        for r in results[:2]:
+                            claim = (r.snippet or r.title or "")[:240]
+                            if not r.url or not claim:
+                                continue
+                            public_evidence.setdefault(crit, []).append(
+                                ComparisonEvidenceItem(
+                                    claim=claim, source_url=r.url, source_title=r.title, basis="public_source"
+                                )
+                            )
+                            public_items.append(
+                                {
+                                    "claim": claim,
+                                    "source_title": r.title,
+                                    "source_url": r.url,
+                                    "source_domain": r.domain,
+                                    "retrieved_at": r.retrieved_at,
+                                    "supporting_excerpt_or_summary": claim,
+                                    "evidence_type": "secondary",
+                                    "confidence": "medium",
+                                }
+                            )
+                else:
+                    note = (
+                        "Public pages were not retrieved (no search tool configured); domain-default cells "
+                        "are model knowledge, and user-supplied cells still stand."
+                    )
+            envelope = build_comparison_envelope(
+                intent, illustrative=False, public_evidence=public_evidence, search_note=note
+            )
+        packet = ResearchPacket.model_validate(
+            comparison_research_packet(
+                task.run_id, task.original_task, envelope, mode=mode, public_items=public_items, search_note=note
+            )
+        ).model_dump(mode="json")
+        return AgentResult(
+            agent_name=self.name,
+            status="completed",
+            summary=packet["agent_summary"],
+            output=packet,
+            artifacts={"comparison_envelope": envelope.model_dump(mode="json")},
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    # -------------------------------------------------------------- briefing
+    def _run_briefing(self, task: TaskSpec, context: dict[str, Any] | None = None) -> Any:
         result = super().run(task, context)
         if result.status != "completed":
             return result

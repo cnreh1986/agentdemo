@@ -36,6 +36,7 @@ def run_human_revision(
     state: dict[str, Any],
     *,
     search_provider: SearchProvider | None = None,
+    jobs_provider: Any | None = None,
     prompt_overrides: dict[str, str] | None = None,
     on_update: UpdateCallback | None = None,
 ) -> dict[str, Any]:
@@ -64,7 +65,12 @@ def run_human_revision(
         _emit(on_update, state)
         return state
 
-    ctx = NodeContext(provider, search_provider=search_provider, prompt_overrides=prompt_overrides)
+    ctx = NodeContext(
+        provider,
+        search_provider=search_provider,
+        jobs_provider=jobs_provider,
+        prompt_overrides=prompt_overrides,
+    )
     state = _merge(
         state,
         {

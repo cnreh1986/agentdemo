@@ -11,4 +11,6 @@ class AgentResult(BaseModel):
     summary: str
     output: dict[str, Any] = Field(default_factory=dict)
     issues: list[str] = Field(default_factory=list)
+    # Typed side outputs (e.g. job_envelope) that the node stores beside the main output.
+    artifacts: dict[str, Any] = Field(default_factory=dict)
     duration_ms: int | None = None
